@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; if [[ \"$FILE\" == *.ts ]]; then bun run typecheck 2>&1 | head -20; fi"
+          },
+          {
+            "type": "command",
+            "command": "FILE=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; TEST=\"${FILE%.ts}.test.ts\"; [ -f \"$TEST\" ] && bun test \"$TEST\" 2>&1 | tail -20 || true"
+          }
+        ]
+      }
+    ]
+  }
+}
