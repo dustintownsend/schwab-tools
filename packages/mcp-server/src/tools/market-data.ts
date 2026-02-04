@@ -116,6 +116,22 @@ export const marketDataTools = [
           enum: ["1min", "5min", "10min", "15min", "30min", "1d", "1w", "1mo"],
           description: "Candle frequency (default: 1d)",
         },
+        startDate: {
+          type: "string",
+          description: "Optional start date/time in ISO-8601 format",
+        },
+        endDate: {
+          type: "string",
+          description: "Optional end date/time in ISO-8601 format",
+        },
+        needExtendedHoursData: {
+          type: "boolean",
+          description: "Include extended-hours data",
+        },
+        needPreviousClose: {
+          type: "boolean",
+          description: "Include previous close values",
+        },
       },
       required: ["symbol"],
     },
@@ -238,13 +254,21 @@ const getQuotesProgram = (request: QuoteRequestParams) =>
 const getPriceHistoryProgram = (
   symbol: string,
   period?: PriceHistoryPeriod,
-  frequency?: PriceHistoryFrequency
+  frequency?: PriceHistoryFrequency,
+  startDate?: Date,
+  endDate?: Date,
+  needExtendedHoursData?: boolean,
+  needPreviousClose?: boolean
 ) =>
   Effect.gen(function* () {
     const priceHistoryService = yield* PriceHistoryService;
     return yield* priceHistoryService.getPriceHistory(symbol, {
       period: period ?? "1mo",
       frequency: frequency ?? "1d",
+      startDate,
+      endDate,
+      needExtendedHoursData,
+      needPreviousClose,
     });
   });
 
@@ -352,7 +376,23 @@ export async function handleMarketDataTool(
       const symbol = args.symbol as string;
       const period = args.period as PriceHistoryPeriod | undefined;
       const frequency = args.frequency as PriceHistoryFrequency | undefined;
-      return runWithResult(getPriceHistoryProgram(symbol, period, frequency));
+      const startDate = args.startDate
+        ? new Date(args.startDate as string)
+        : undefined;
+      const endDate = args.endDate ? new Date(args.endDate as string) : undefined;
+      const needExtendedHoursData = args.needExtendedHoursData as boolean | undefined;
+      const needPreviousClose = args.needPreviousClose as boolean | undefined;
+      return runWithResult(
+        getPriceHistoryProgram(
+          symbol,
+          period,
+          frequency,
+          startDate,
+          endDate,
+          needExtendedHoursData,
+          needPreviousClose
+        )
+      );
     }
 
     case "schwab_get_market_hours": {

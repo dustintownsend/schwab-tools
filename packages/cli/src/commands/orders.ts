@@ -24,6 +24,8 @@ import {
 const getAllOrdersProgram = (params?: {
   status?: OrderStatus | "ALL";
   maxResults?: number;
+  fromEnteredTime?: Date;
+  toEnteredTime?: Date;
 }) =>
   Effect.gen(function* () {
     const orderService = yield* OrderService;
@@ -35,7 +37,12 @@ const getAllOrdersProgram = (params?: {
  */
 const getOrdersProgram = (
   accountHash: string,
-  params?: { status?: OrderStatus | "ALL"; maxResults?: number }
+  params?: {
+    status?: OrderStatus | "ALL";
+    maxResults?: number;
+    fromEnteredTime?: Date;
+    toEnteredTime?: Date;
+  }
 ) =>
   Effect.gen(function* () {
     const orderService = yield* OrderService;
@@ -397,15 +404,29 @@ export function createOrdersCommand(): Command {
       "ALL"
     )
     .option("-n, --limit <count>", "Maximum number of orders", "50")
+    .option("--from <isoDate>", "From entered time in ISO-8601 format")
+    .option("--to <isoDate>", "To entered time in ISO-8601 format")
     .option("--json", "Output as JSON")
     .action(async (opts) => {
       const spinner = ora("Fetching orders...").start();
       const status = opts.status as OrderStatus | "ALL";
       const maxResults = parseInt(opts.limit, 10);
+      const fromEnteredTime = opts.from ? new Date(opts.from) : undefined;
+      const toEnteredTime = opts.to ? new Date(opts.to) : undefined;
 
       const program = opts.account
-        ? getOrdersProgram(opts.account, { status, maxResults })
-        : getAllOrdersProgram({ status, maxResults });
+        ? getOrdersProgram(opts.account, {
+            status,
+            maxResults,
+            fromEnteredTime,
+            toEnteredTime,
+          })
+        : getAllOrdersProgram({
+            status,
+            maxResults,
+            fromEnteredTime,
+            toEnteredTime,
+          });
 
       const exit = await runSchwabExit(program);
       spinner.stop();

@@ -66,6 +66,23 @@ const VALID_MOVER_SYMBOLS = [
   "OPTION_CALL",
 ] as const;
 
+const VALID_INSTRUMENT_PROJECTIONS = [
+  "symbol-search",
+  "symbol-regex",
+  "desc-search",
+  "desc-regex",
+  "search",
+  "fundamental",
+] as const;
+
+const VALID_MARKET_TYPES = [
+  "EQUITY",
+  "OPTION",
+  "BOND",
+  "FUTURE",
+  "FOREX",
+] as const;
+
 const normalizeMoverSymbol = (symbol: string): string => {
   const upper = symbol.toUpperCase();
   if (upper === "SPX" || upper === "DJI" || upper === "COMPX") {
@@ -114,9 +131,20 @@ export function createMarketCommand(): Command {
 
       const normalizedSymbol = normalizeMoverSymbol(symbol);
       const spinner = ora(`Fetching movers for ${normalizedSymbol}...`).start();
-      const frequency = options.frequency
-        ? (parseInt(options.frequency, 10) as 0 | 1 | 5 | 10 | 30 | 60)
+      const parsedFrequency = options.frequency
+        ? parseInt(options.frequency, 10)
         : undefined;
+      if (
+        parsedFrequency !== undefined &&
+        !([0, 1, 5, 10, 30, 60] as const).includes(
+          parsedFrequency as 0 | 1 | 5 | 10 | 30 | 60
+        )
+      ) {
+        spinner.stop();
+        console.error(chalk.red("Invalid --frequency. Use one of: 0,1,5,10,30,60"));
+        process.exit(1);
+      }
+      const frequency = parsedFrequency as 0 | 1 | 5 | 10 | 30 | 60 | undefined;
 
       const exit = await runSchwabExit(
         getMoversProgram(normalizedSymbol, {
@@ -175,6 +203,15 @@ export function createMarketCommand(): Command {
     )
     .option("--json", "Output as JSON")
     .action(async (symbol: string, projection: InstrumentProjection, options) => {
+      if (!VALID_INSTRUMENT_PROJECTIONS.includes(projection)) {
+        console.error(
+          chalk.red(
+            `Invalid projection '${projection}'. Valid values: ${VALID_INSTRUMENT_PROJECTIONS.join(", ")}`
+          )
+        );
+        process.exit(1);
+      }
+
       const spinner = ora("Searching instruments...").start();
 
       const exit = await runSchwabExit(
@@ -255,7 +292,20 @@ export function createMarketCommand(): Command {
       const spinner = ora("Fetching market hours...").start();
       const markets = options.markets
         .split(",")
-        .map((m: string) => m.trim().toUpperCase()) as MarketType[];
+        .map((m: string) => m.trim().toUpperCase())
+        .filter(Boolean) as MarketType[];
+      const invalidMarkets = markets.filter(
+        (market) => !VALID_MARKET_TYPES.includes(market)
+      );
+      if (invalidMarkets.length > 0) {
+        spinner.stop();
+        console.error(
+          chalk.red(
+            `Invalid market(s): ${invalidMarkets.join(", ")}. Valid values: ${VALID_MARKET_TYPES.join(", ")}`
+          )
+        );
+        process.exit(1);
+      }
       const date = options.date ? new Date(options.date) : undefined;
 
       const exit = await runSchwabExit(getMarketHoursProgram(markets, date));
@@ -291,11 +341,21 @@ export function createMarketCommand(): Command {
     .option("--date <date>", "Date (YYYY-MM-DD)")
     .option("--json", "Output as JSON")
     .action(async (marketType: MarketType, options) => {
+      const normalizedMarket = marketType.toUpperCase() as MarketType;
+      if (!VALID_MARKET_TYPES.includes(normalizedMarket)) {
+        console.error(
+          chalk.red(
+            `Invalid market '${marketType}'. Valid values: ${VALID_MARKET_TYPES.join(", ")}`
+          )
+        );
+        process.exit(1);
+      }
+
       const spinner = ora(`Fetching ${marketType} market hours...`).start();
       const date = options.date ? new Date(options.date) : undefined;
 
       const exit = await runSchwabExit(
-        getMarketHourProgram(marketType.toUpperCase() as MarketType, date)
+        getMarketHourProgram(normalizedMarket, date)
       );
       spinner.stop();
 

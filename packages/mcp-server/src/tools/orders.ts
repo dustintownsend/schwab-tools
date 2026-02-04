@@ -62,6 +62,14 @@ export const orderTools = [
           type: "number",
           description: "Maximum number of orders to return (default: 50)",
         },
+        fromEnteredTime: {
+          type: "string",
+          description: "From entered time in ISO-8601 format",
+        },
+        toEnteredTime: {
+          type: "string",
+          description: "To entered time in ISO-8601 format",
+        },
       },
       required: [],
     },
@@ -256,7 +264,12 @@ export const orderTools = [
 // Effect programs
 const getOrdersProgram = (
   accountHash: string,
-  params?: { status?: OrderStatus | "ALL"; maxResults?: number }
+  params?: {
+    status?: OrderStatus | "ALL";
+    maxResults?: number;
+    fromEnteredTime?: Date;
+    toEnteredTime?: Date;
+  }
 ) =>
   Effect.gen(function* () {
     const orderService = yield* OrderService;
@@ -266,6 +279,8 @@ const getOrdersProgram = (
 const getAllOrdersProgram = (params?: {
   status?: OrderStatus | "ALL";
   maxResults?: number;
+  fromEnteredTime?: Date;
+  toEnteredTime?: Date;
 }) =>
   Effect.gen(function* () {
     const orderService = yield* OrderService;
@@ -465,10 +480,30 @@ export async function handleOrderTool(
       const accountHash = args.accountHash as string | undefined;
       const status = args.status as OrderStatus | "ALL" | undefined;
       const maxResults = (args.maxResults as number) || 50;
+      const fromEnteredTime = args.fromEnteredTime
+        ? new Date(args.fromEnteredTime as string)
+        : undefined;
+      const toEnteredTime = args.toEnteredTime
+        ? new Date(args.toEnteredTime as string)
+        : undefined;
 
       const result = accountHash
-        ? await runWithResult(getOrdersProgram(accountHash, { status, maxResults }))
-        : await runWithResult(getAllOrdersProgram({ status, maxResults }));
+        ? await runWithResult(
+            getOrdersProgram(accountHash, {
+              status,
+              maxResults,
+              fromEnteredTime,
+              toEnteredTime,
+            })
+          )
+        : await runWithResult(
+            getAllOrdersProgram({
+              status,
+              maxResults,
+              fromEnteredTime,
+              toEnteredTime,
+            })
+          );
 
       if (!result.success) return result;
 

@@ -37,15 +37,18 @@ const getQuotesProgram = (request: QuoteRequestParams) =>
  */
 const getPriceHistoryProgram = (
   symbol: string,
-  period: PriceHistoryPeriod,
-  frequency: PriceHistoryFrequency
+  params: {
+    period: PriceHistoryPeriod;
+    frequency: PriceHistoryFrequency;
+    startDate?: Date;
+    endDate?: Date;
+    needExtendedHoursData?: boolean;
+    needPreviousClose?: boolean;
+  }
 ) =>
   Effect.gen(function* () {
     const priceHistoryService = yield* PriceHistoryService;
-    return yield* priceHistoryService.getPriceHistory(symbol, {
-      period,
-      frequency,
-    });
+    return yield* priceHistoryService.getPriceHistory(symbol, params);
   });
 
 function formatPrice(price: number): string {
@@ -151,6 +154,7 @@ export function createQuoteCommand(): Command {
       "--indicative",
       "Include indicative ETF symbols (returns $XYZ.IV alongside ETFs)"
     )
+    .option("--realtime", "Advisor-token-only realtime quote request")
     .option("--json", "Output as JSON")
     .action(async (symbols: string[], options) => {
       const spinner = ora("Fetching quotes...").start();
@@ -188,6 +192,7 @@ export function createQuoteCommand(): Command {
           ssids,
           fields,
           indicative: options.indicative,
+          realtime: options.realtime,
         })
       );
 
@@ -225,16 +230,23 @@ export function createHistoryCommand(): Command {
       "Candle frequency (1min, 5min, 10min, 15min, 30min, 1d, 1w, 1mo)",
       "1d"
     )
+    .option("--start <isoDate>", "Start date/time in ISO-8601 format")
+    .option("--end <isoDate>", "End date/time in ISO-8601 format")
+    .option("--extended-hours", "Include extended-hours candles")
+    .option("--previous-close", "Request previous close values")
     .option("--json", "Output as JSON")
     .action(async (symbol: string, options) => {
       const spinner = ora(`Fetching price history for ${symbol}...`).start();
 
       const exit = await runSchwabExit(
-        getPriceHistoryProgram(
-          symbol,
-          options.period as PriceHistoryPeriod,
-          options.freq as PriceHistoryFrequency
-        )
+        getPriceHistoryProgram(symbol, {
+          period: options.period as PriceHistoryPeriod,
+          frequency: options.freq as PriceHistoryFrequency,
+          startDate: options.start ? new Date(options.start) : undefined,
+          endDate: options.end ? new Date(options.end) : undefined,
+          needExtendedHoursData: options.extendedHours,
+          needPreviousClose: options.previousClose,
+        })
       );
 
       spinner.stop();
