@@ -15,6 +15,7 @@ import {
   type Order,
   type OrderStatus,
   type OrderSpec,
+  type OrderInstruction,
 } from "@schwab-tools/core";
 
 /**
@@ -57,6 +58,22 @@ const cancelOrderProgram = (accountHash: string, orderId: string) =>
   Effect.gen(function* () {
     const orderService = yield* OrderService;
     return yield* orderService.cancelOrder(accountHash, orderId);
+  });
+
+const previewOrderProgram = (accountHash: string, order: OrderSpec) =>
+  Effect.gen(function* () {
+    const orderService = yield* OrderService;
+    return yield* orderService.previewOrder(accountHash, order);
+  });
+
+const replaceOrderProgram = (
+  accountHash: string,
+  orderId: string,
+  order: OrderSpec
+) =>
+  Effect.gen(function* () {
+    const orderService = yield* OrderService;
+    return yield* orderService.replaceOrder(accountHash, orderId, order);
   });
 
 /**
@@ -161,6 +178,65 @@ function printOrderDetails(order: Order): void {
   }
 
   console.log();
+}
+
+function buildOrderSpec(
+  action: OrderInstruction,
+  symbol: string,
+  quantity: number,
+  orderType: "MARKET" | "LIMIT",
+  price: number | undefined,
+  duration: "DAY" | "GOOD_TILL_CANCEL" | "GTC"
+): OrderSpec {
+  if (orderType === "LIMIT" && price === undefined) {
+    throw new Error("Limit orders require --price");
+  }
+
+  const option = isOptionSymbol(symbol);
+  let order: OrderSpec;
+
+  if (option) {
+    switch (action) {
+      case "BUY_TO_OPEN":
+        order = OrderBuilder.optionBuyToOpen(symbol, quantity, price);
+        break;
+      case "SELL_TO_OPEN":
+        order = OrderBuilder.optionSellToOpen(symbol, quantity, price);
+        break;
+      case "BUY_TO_CLOSE":
+        order = OrderBuilder.optionBuyToClose(symbol, quantity, price);
+        break;
+      case "SELL_TO_CLOSE":
+        order = OrderBuilder.optionSellToClose(symbol, quantity, price);
+        break;
+      default:
+        throw new Error(
+          `Invalid option action ${action}. Use BUY_TO_OPEN, SELL_TO_OPEN, BUY_TO_CLOSE, SELL_TO_CLOSE`
+        );
+    }
+  } else {
+    switch (action) {
+      case "BUY":
+        order =
+          price !== undefined
+            ? OrderBuilder.equityBuyLimit(symbol, quantity, price)
+            : OrderBuilder.equityBuy(symbol, quantity);
+        break;
+      case "SELL":
+        order =
+          price !== undefined
+            ? OrderBuilder.equitySellLimit(symbol, quantity, price)
+            : OrderBuilder.equitySell(symbol, quantity);
+        break;
+      default:
+        throw new Error(`Invalid equity action ${action}. Use BUY or SELL`);
+    }
+  }
+
+  if (duration === "GTC" || duration === "GOOD_TILL_CANCEL") {
+    return OrderBuilder.withGTC(order);
+  }
+  return order;
 }
 
 async function confirm(): Promise<boolean> {
@@ -423,6 +499,101 @@ export function createOrdersCommand(): Command {
         },
         onSuccess: () => {
           console.log(chalk.green(`Order ${orderId} canceled`));
+        },
+      });
+    });
+
+  orders
+    .command("preview")
+    .description("Preview an order without placing it")
+    .requiredOption("-a, --account <hash>", "Account hash")
+    .requiredOption(
+      "--action <action>",
+      "BUY, SELL, BUY_TO_OPEN, SELL_TO_OPEN, BUY_TO_CLOSE, SELL_TO_CLOSE"
+    )
+    .requiredOption("--symbol <symbol>", "Stock symbol or OCC option symbol")
+    .requiredOption("--quantity <quantity>", "Quantity")
+    .option("--type <type>", "MARKET or LIMIT", "LIMIT")
+    .option("--price <price>", "Limit price")
+    .option("--duration <duration>", "DAY or GTC", "DAY")
+    .option("--json", "Output as JSON")
+    .action(async (opts) => {
+      const spinner = ora("Previewing order...").start();
+
+      const program = Effect.gen(function* () {
+        const order = buildOrderSpec(
+          opts.action as OrderInstruction,
+          opts.symbol,
+          parseInt(opts.quantity, 10),
+          (opts.type.toUpperCase() as "MARKET" | "LIMIT"),
+          opts.price ? parseFloat(opts.price) : undefined,
+          opts.duration.toUpperCase() as "DAY" | "GOOD_TILL_CANCEL" | "GTC"
+        );
+        return yield* previewOrderProgram(opts.account, order);
+      });
+
+      const exit = await runSchwabExit(program);
+      spinner.stop();
+
+      Exit.match(exit, {
+        onFailure: (cause) => {
+          console.error(chalk.red(formatCause(cause)));
+          process.exit(1);
+        },
+        onSuccess: (order) => {
+          if (opts.json) {
+            console.log(JSON.stringify(order, null, 2));
+            return;
+          }
+          printOrderDetails(order);
+        },
+      });
+    });
+
+  orders
+    .command("replace")
+    .description("Replace an existing order")
+    .argument("<orderId>", "Order ID to replace")
+    .requiredOption("-a, --account <hash>", "Account hash")
+    .requiredOption(
+      "--action <action>",
+      "BUY, SELL, BUY_TO_OPEN, SELL_TO_OPEN, BUY_TO_CLOSE, SELL_TO_CLOSE"
+    )
+    .requiredOption("--symbol <symbol>", "Stock symbol or OCC option symbol")
+    .requiredOption("--quantity <quantity>", "Quantity")
+    .option("--type <type>", "MARKET or LIMIT", "LIMIT")
+    .option("--price <price>", "Limit price")
+    .option("--duration <duration>", "DAY or GTC", "DAY")
+    .option("--json", "Output as JSON")
+    .action(async (orderId: string, opts) => {
+      const spinner = ora(`Replacing order ${orderId}...`).start();
+
+      const program = Effect.gen(function* () {
+        const order = buildOrderSpec(
+          opts.action as OrderInstruction,
+          opts.symbol,
+          parseInt(opts.quantity, 10),
+          (opts.type.toUpperCase() as "MARKET" | "LIMIT"),
+          opts.price ? parseFloat(opts.price) : undefined,
+          opts.duration.toUpperCase() as "DAY" | "GOOD_TILL_CANCEL" | "GTC"
+        );
+        return yield* replaceOrderProgram(opts.account, orderId, order);
+      });
+
+      const exit = await runSchwabExit(program);
+      spinner.stop();
+
+      Exit.match(exit, {
+        onFailure: (cause) => {
+          console.error(chalk.red(formatCause(cause)));
+          process.exit(1);
+        },
+        onSuccess: (newOrderId) => {
+          if (opts.json) {
+            console.log(JSON.stringify({ orderId: newOrderId }, null, 2));
+            return;
+          }
+          console.log(chalk.green(`Order replaced: ${newOrderId}`));
         },
       });
     });

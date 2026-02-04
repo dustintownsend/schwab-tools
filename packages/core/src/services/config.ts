@@ -21,6 +21,12 @@ export interface ConfigOptions {
   readonly baseUrl?: string;
   readonly requestsPerMinute?: number;
   readonly maxRetries?: number;
+  readonly schwabClientAppId?: string;
+  readonly schwabClientChannel?: string;
+  readonly schwabClientFunctionId?: string;
+  readonly schwabResourceVersion?: string;
+  readonly schwabThirdPartyId?: string;
+  readonly schwabPilotRollout?: string;
 }
 
 interface StoredConfig {
@@ -28,6 +34,12 @@ interface StoredConfig {
   clientSecret?: string;
   callbackPort?: number;
   callbackUrl?: string;
+  schwabClientAppId?: string;
+  schwabClientChannel?: string;
+  schwabClientFunctionId?: string;
+  schwabResourceVersion?: string;
+  schwabThirdPartyId?: string;
+  schwabPilotRollout?: string;
 }
 
 /**
@@ -107,6 +119,30 @@ export const makeConfigFromOptions = (
       baseUrl: options.baseUrl ?? SCHWAB_API_BASE,
       requestsPerMinute: options.requestsPerMinute ?? DEFAULT_REQUESTS_PER_MINUTE,
       maxRetries: options.maxRetries ?? DEFAULT_MAX_RETRIES,
+      schwabClientAppId:
+        options.schwabClientAppId ??
+        process.env.SCHWAB_CLIENT_APP_ID ??
+        storedConfig?.schwabClientAppId,
+      schwabClientChannel:
+        options.schwabClientChannel ??
+        process.env.SCHWAB_CLIENT_CHANNEL ??
+        storedConfig?.schwabClientChannel,
+      schwabClientFunctionId:
+        options.schwabClientFunctionId ??
+        process.env.SCHWAB_CLIENT_FUNCTION_ID ??
+        storedConfig?.schwabClientFunctionId,
+      schwabResourceVersion:
+        options.schwabResourceVersion ??
+        process.env.SCHWAB_RESOURCE_VERSION ??
+        storedConfig?.schwabResourceVersion,
+      schwabThirdPartyId:
+        options.schwabThirdPartyId ??
+        process.env.SCHWAB_THIRD_PARTY_ID ??
+        storedConfig?.schwabThirdPartyId,
+      schwabPilotRollout:
+        options.schwabPilotRollout ??
+        process.env.SCHWAB_PILOT_ROLLOUT ??
+        storedConfig?.schwabPilotRollout,
     };
   });
 

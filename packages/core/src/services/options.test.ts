@@ -3,12 +3,17 @@ import { Effect } from "effect";
 import { OptionChainService } from "./index.js";
 import { OptionChainServiceTest } from "../layers/test.js";
 import { SymbolNotFoundError } from "../errors.js";
-import { mockOptionChain, mockCompactOptionChain } from "../../test/fixtures/options.js";
+import {
+  mockOptionChain,
+  mockCompactOptionChain,
+  mockExpirationChain,
+} from "../../test/fixtures/options.js";
 
 describe("OptionChainService", () => {
   const testLayer = OptionChainServiceTest({
     optionChain: mockOptionChain,
     compactChain: mockCompactOptionChain,
+    expirationChain: mockExpirationChain,
   });
 
   describe("getOptionChain", () => {
@@ -172,6 +177,38 @@ describe("OptionChainService", () => {
       const program = Effect.gen(function* () {
         const service = yield* OptionChainService;
         return yield* service.getCompactOptionChain("INVALID");
+      });
+
+      const exit = await Effect.runPromiseExit(program.pipe(Effect.provide(emptyLayer)));
+
+      expect(exit._tag).toBe("Failure");
+      if (exit._tag === "Failure" && exit.cause._tag === "Fail") {
+        const error = exit.cause.error as SymbolNotFoundError;
+        expect(error._tag).toBe("SymbolNotFoundError");
+      }
+    });
+  });
+
+  describe("getExpirationChain", () => {
+    it("returns option expiration chain for valid symbol", async () => {
+      const program = Effect.gen(function* () {
+        const service = yield* OptionChainService;
+        return yield* service.getExpirationChain("AAPL");
+      });
+
+      const result = await Effect.runPromise(program.pipe(Effect.provide(testLayer)));
+
+      expect(result.length).toBeGreaterThan(0);
+      expect(result[0].expirationDate).toBeDefined();
+      expect(result[0].daysToExpiration).toBeGreaterThanOrEqual(0);
+    });
+
+    it("fails with SymbolNotFoundError when no expiration chain available", async () => {
+      const emptyLayer = OptionChainServiceTest({});
+
+      const program = Effect.gen(function* () {
+        const service = yield* OptionChainService;
+        return yield* service.getExpirationChain("INVALID");
       });
 
       const exit = await Effect.runPromiseExit(program.pipe(Effect.provide(emptyLayer)));

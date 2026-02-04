@@ -32,6 +32,12 @@ const getOptionChainProgram = (
     return yield* optionService.getCompactOptionChain(symbol, params);
   });
 
+const getExpirationChainProgram = (symbol: string) =>
+  Effect.gen(function* () {
+    const optionService = yield* OptionChainService;
+    return yield* optionService.getExpirationChain(symbol);
+  });
+
 function printOptionsTable(
   options: readonly CompactOption[],
   underlyingPrice: number
@@ -145,6 +151,41 @@ export function createOptionsCommand(): Command {
             }
           }
 
+          console.log();
+        },
+      });
+    });
+
+  options
+    .command("expirations")
+    .description("Get option expiration dates for a symbol")
+    .argument("<symbol>", "Underlying symbol")
+    .option("--json", "Output as JSON")
+    .action(async (symbol: string, opts) => {
+      const spinner = ora(`Fetching option expirations for ${symbol}...`).start();
+
+      const exit = await runSchwabExit(getExpirationChainProgram(symbol));
+      spinner.stop();
+
+      Exit.match(exit, {
+        onFailure: (cause) => {
+          console.error(chalk.red(formatCause(cause)));
+          process.exit(1);
+        },
+        onSuccess: (expirations) => {
+          if (opts.json) {
+            console.log(JSON.stringify(expirations, null, 2));
+            return;
+          }
+
+          console.log(`\n${chalk.bold(symbol.toUpperCase())} Option Expirations`);
+          console.log("=".repeat(60));
+          for (const exp of expirations) {
+            const type = exp.standard ? "Standard" : "Non-standard";
+            console.log(
+              `  ${exp.expirationDate}  (${exp.daysToExpiration} DTE)  ${exp.expirationType}  ${type}`
+            );
+          }
           console.log();
         },
       });

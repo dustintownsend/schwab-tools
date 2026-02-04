@@ -113,6 +113,33 @@ describe("QuoteService", () => {
     });
   });
 
+  describe("getQuotesByRequest", () => {
+    it("returns quotes for symbol-based request", async () => {
+      const program = Effect.gen(function* () {
+        const service = yield* QuoteService;
+        return yield* service.getQuotesByRequest({
+          symbols: ["AAPL", "TSLA"],
+          fields: ["quote", "reference"],
+        });
+      });
+
+      const result = await Effect.runPromise(program.pipe(Effect.provide(testLayer)));
+
+      expect(result).toHaveLength(2);
+      expect(result.map((q) => q.symbol).sort()).toEqual(["AAPL", "TSLA"]);
+    });
+
+    it("returns empty array when no identifiers are provided", async () => {
+      const program = Effect.gen(function* () {
+        const service = yield* QuoteService;
+        return yield* service.getQuotesByRequest({});
+      });
+
+      const result = await Effect.runPromise(program.pipe(Effect.provide(testLayer)));
+      expect(result).toHaveLength(0);
+    });
+  });
+
   describe("quote data structure", () => {
     it("contains all expected fields", async () => {
       const program = Effect.gen(function* () {

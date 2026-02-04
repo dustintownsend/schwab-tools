@@ -51,6 +51,20 @@ export const optionTools = [
     },
   },
   {
+    name: "schwab_get_option_expiration_chain",
+    description: "Get option expiration dates for a symbol",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        symbol: {
+          type: "string",
+          description: 'Underlying stock/ETF symbol (e.g., "AAPL", "SPY")',
+        },
+      },
+      required: ["symbol"],
+    },
+  },
+  {
     name: "schwab_build_option_symbol",
     description:
       "Build an OCC option symbol from components",
@@ -108,6 +122,12 @@ const getOptionChainProgram = (
   Effect.gen(function* () {
     const optionService = yield* OptionChainService;
     return yield* optionService.getCompactOptionChain(symbol, params);
+  });
+
+const getExpirationChainProgram = (symbol: string) =>
+  Effect.gen(function* () {
+    const optionService = yield* OptionChainService;
+    return yield* optionService.getExpirationChain(symbol);
   });
 
 // Result types
@@ -210,6 +230,22 @@ export async function handleOptionTool(
                 ? []
                 : exp.puts.map(formatCompactOption),
           })),
+        },
+      };
+    }
+
+    case "schwab_get_option_expiration_chain": {
+      const symbol = args.symbol as string;
+
+      const result = await runWithResult(getExpirationChainProgram(symbol));
+      if (!result.success) return result;
+
+      return {
+        success: true,
+        data: {
+          symbol: symbol.toUpperCase(),
+          expirationCount: result.data.length,
+          expirations: result.data,
         },
       };
     }

@@ -19,15 +19,17 @@ import {
   type Candle,
   type PriceHistoryPeriod,
   type PriceHistoryFrequency,
+  type QuoteField,
+  type QuoteRequestParams,
 } from "@schwab-tools/core";
 
 /**
  * Effect program to fetch quotes
  */
-const getQuotesProgram = (symbols: readonly string[]) =>
+const getQuotesProgram = (request: QuoteRequestParams) =>
   Effect.gen(function* () {
     const quoteService = yield* QuoteService;
-    return yield* quoteService.getQuotes(symbols);
+    return yield* quoteService.getQuotesByRequest(request);
   });
 
 /**
@@ -138,12 +140,56 @@ function displayCandles(
 export function createQuoteCommand(): Command {
   const quote = new Command("quote")
     .description("Get stock/ETF quotes")
-    .argument("<symbols...>", "Stock/ETF symbols")
+    .argument("[symbols...]", "Stock/ETF symbols")
+    .option("--cusips <cusips>", "Comma-separated CUSIPs")
+    .option("--ssids <ssids>", "Comma-separated SSIDs")
+    .option(
+      "--fields <fields>",
+      "Comma-separated fields (all,quote,fundamental,extended,reference,regular)"
+    )
+    .option(
+      "--indicative",
+      "Include indicative ETF symbols (returns $XYZ.IV alongside ETFs)"
+    )
     .option("--json", "Output as JSON")
     .action(async (symbols: string[], options) => {
       const spinner = ora("Fetching quotes...").start();
+      const fields = options.fields
+        ? (options.fields
+            .split(",")
+            .map((value: string) => value.trim())
+            .filter(Boolean) as QuoteField[])
+        : undefined;
+      const cusips = options.cusips
+        ? (options.cusips
+            .split(",")
+            .map((value: string) => value.trim())
+            .filter(Boolean) as string[])
+        : undefined;
+      const ssids = options.ssids
+        ? (options.ssids
+            .split(",")
+            .map((value: string) => value.trim())
+            .filter(Boolean) as string[])
+        : undefined;
 
-      const exit = await runSchwabExit(getQuotesProgram(symbols));
+      if (symbols.length === 0 && !cusips?.length && !ssids?.length) {
+        spinner.stop();
+        console.error(
+          chalk.red("Provide symbols, --cusips, or --ssids to fetch quotes.")
+        );
+        process.exit(1);
+      }
+
+      const exit = await runSchwabExit(
+        getQuotesProgram({
+          symbols: symbols.length > 0 ? symbols : undefined,
+          cusips,
+          ssids,
+          fields,
+          indicative: options.indicative,
+        })
+      );
 
       spinner.stop();
 
@@ -171,12 +217,12 @@ export function createHistoryCommand(): Command {
     .argument("<symbol>", "Stock/ETF symbol")
     .option(
       "-p, --period <period>",
-      "Time period (1d, 5d, 1mo, 3mo, 6mo, 1y, 5y)",
+      "Time period (1d, 2d, 3d, 4d, 5d, 10d, 1mo, 2mo, 3mo, 6mo, 1y, 2y, 3y, 5y, 10y, 15y, 20y, ytd)",
       "1mo"
     )
     .option(
       "-f, --freq <frequency>",
-      "Candle frequency (1min, 5min, 15min, 30min, 1d, 1w)",
+      "Candle frequency (1min, 5min, 10min, 15min, 30min, 1d, 1w, 1mo)",
       "1d"
     )
     .option("--json", "Output as JSON")

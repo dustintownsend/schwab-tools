@@ -5,11 +5,13 @@ import {
   Effect,
   Exit,
   AccountService,
+  UserPreferenceService,
   runSchwabExit,
   formatCause,
   AccountNotFoundError,
   type Account,
   type Position,
+  type TransactionType,
 } from "@schwab-tools/core";
 
 /**
@@ -35,6 +37,31 @@ const getAccountProgram = (accountHash: string) =>
   Effect.gen(function* () {
     const accountService = yield* AccountService;
     return yield* accountService.getAccount(accountHash);
+  });
+
+const getUserPreferenceProgram = Effect.gen(function* () {
+  const service = yield* UserPreferenceService;
+  return yield* service.getUserPreference;
+});
+
+const getTransactionsProgram = (
+  accountHash: string,
+  params?: {
+    startDate?: Date;
+    endDate?: Date;
+    symbol?: string;
+    types?: TransactionType[];
+  }
+) =>
+  Effect.gen(function* () {
+    const accountService = yield* AccountService;
+    return yield* accountService.getTransactions(accountHash, params);
+  });
+
+const getTransactionProgram = (accountHash: string, transactionId: string) =>
+  Effect.gen(function* () {
+    const accountService = yield* AccountService;
+    return yield* accountService.getTransaction(accountHash, transactionId);
   });
 
 /**
@@ -175,6 +202,43 @@ function printPositionTable(positions: readonly Position[]): void {
   }
 }
 
+function printTransactionList(
+  transactions: readonly {
+    transactionId: string;
+    transactionDate: Date;
+    type: string;
+    description: string;
+    symbol?: string;
+    netAmount: number;
+  }[]
+): void {
+  console.log("\n" + chalk.bold("Transactions"));
+  console.log("=".repeat(90));
+  console.log(
+    "  " +
+      "Date".padEnd(12) +
+      "Type".padEnd(24) +
+      "Symbol".padEnd(12) +
+      "Amount".padStart(14) +
+      "  Description"
+  );
+  console.log("  " + chalk.dim("-".repeat(88)));
+
+  for (const tx of transactions) {
+    const amountColor = tx.netAmount >= 0 ? chalk.green : chalk.red;
+    console.log(
+      "  " +
+        tx.transactionDate.toISOString().slice(0, 10).padEnd(12) +
+        tx.type.slice(0, 22).padEnd(24) +
+        (tx.symbol ?? "-").slice(0, 11).padEnd(12) +
+        amountColor(formatCurrency(tx.netAmount).padStart(14)) +
+        `  ${tx.description}`
+    );
+  }
+
+  console.log();
+}
+
 export function createAccountsCommand(): Command {
   const accounts = new Command("accounts").description(
     "View account information"
@@ -255,6 +319,138 @@ export function createAccountsCommand(): Command {
           }
 
           printAccountDetails(account);
+        },
+      });
+    });
+
+  accounts
+    .command("preferences")
+    .description("Show user preference information")
+    .option("--json", "Output as JSON")
+    .action(async (options) => {
+      const spinner = ora("Fetching user preferences...").start();
+
+      const exit = await runSchwabExit(getUserPreferenceProgram);
+      spinner.stop();
+
+      Exit.match(exit, {
+        onFailure: (cause) => {
+          console.error(chalk.red(formatCause(cause)));
+          process.exit(1);
+        },
+        onSuccess: (preferences) => {
+          if (options.json) {
+            console.log(JSON.stringify(preferences, null, 2));
+            return;
+          }
+
+          console.log("\n" + chalk.bold("User Preferences"));
+          console.log("=".repeat(60));
+          console.log(`  Preference records: ${preferences.length}`);
+          if (preferences[0]?.accounts) {
+            console.log(`  Linked accounts: ${preferences[0].accounts.length}`);
+          }
+          console.log();
+        },
+      });
+    });
+
+  accounts
+    .command("transactions")
+    .description("List account transactions")
+    .option(
+      "-a, --account <hash>",
+      "Account hash (uses first account if not specified)"
+    )
+    .option("--start <isoDate>", "Start date/time in ISO-8601 format")
+    .option("--end <isoDate>", "End date/time in ISO-8601 format")
+    .option("--symbol <symbol>", "Filter by symbol")
+    .option(
+      "--types <types>",
+      "Comma-separated transaction types (e.g., TRADE,DIVIDEND_OR_INTEREST)"
+    )
+    .option("--json", "Output as JSON")
+    .action(async (options) => {
+      const spinner = ora("Fetching transactions...").start();
+
+      const parsedTypes = options.types
+        ? (options.types
+            .split(",")
+            .map((value: string) => value.trim().toUpperCase())
+            .filter(Boolean) as TransactionType[])
+        : undefined;
+
+      const program = Effect.gen(function* () {
+        const accountHash = yield* getAccountHashOrFirst(options.account);
+        return yield* getTransactionsProgram(accountHash, {
+          startDate: options.start ? new Date(options.start) : undefined,
+          endDate: options.end ? new Date(options.end) : undefined,
+          symbol: options.symbol,
+          types: parsedTypes,
+        });
+      });
+
+      const exit = await runSchwabExit(program);
+      spinner.stop();
+
+      Exit.match(exit, {
+        onFailure: (cause) => {
+          console.error(chalk.red(formatCause(cause)));
+          process.exit(1);
+        },
+        onSuccess: (transactions) => {
+          if (options.json) {
+            console.log(JSON.stringify(transactions, null, 2));
+            return;
+          }
+          printTransactionList(transactions);
+        },
+      });
+    });
+
+  accounts
+    .command("transaction")
+    .description("Show one transaction by ID")
+    .argument("<transactionId>", "Transaction ID")
+    .option(
+      "-a, --account <hash>",
+      "Account hash (uses first account if not specified)"
+    )
+    .option("--json", "Output as JSON")
+    .action(async (transactionId: string, options) => {
+      const spinner = ora("Fetching transaction...").start();
+
+      const program = Effect.gen(function* () {
+        const accountHash = yield* getAccountHashOrFirst(options.account);
+        return yield* getTransactionProgram(accountHash, transactionId);
+      });
+
+      const exit = await runSchwabExit(program);
+      spinner.stop();
+
+      Exit.match(exit, {
+        onFailure: (cause) => {
+          console.error(chalk.red(formatCause(cause)));
+          process.exit(1);
+        },
+        onSuccess: (transaction) => {
+          if (options.json) {
+            console.log(JSON.stringify(transaction, null, 2));
+            return;
+          }
+
+          console.log("\n" + chalk.bold("Transaction"));
+          console.log("=".repeat(70));
+          console.log(`  ID: ${chalk.cyan(transaction.transactionId)}`);
+          console.log(`  Type: ${transaction.type}`);
+          console.log(`  Date: ${transaction.transactionDate.toISOString()}`);
+          console.log(`  Settlement: ${transaction.settlementDate.toISOString()}`);
+          console.log(`  Amount: ${formatCurrency(transaction.netAmount)}`);
+          console.log(`  Symbol: ${transaction.symbol ?? "-"}`);
+          console.log(`  Quantity: ${transaction.quantity ?? "-"}`);
+          console.log(`  Price: ${transaction.price ?? "-"}`);
+          console.log(`  Description: ${transaction.description}`);
+          console.log();
         },
       });
     });

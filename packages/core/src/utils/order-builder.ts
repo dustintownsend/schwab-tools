@@ -21,7 +21,14 @@ export type OrderInstruction =
 
 export type OrderType = "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT";
 export type OrderSession = "NORMAL" | "AM" | "PM" | "SEAMLESS";
-export type OrderDuration = "DAY" | "GTC" | "FOK";
+export type OrderDuration =
+  | "DAY"
+  | "GOOD_TILL_CANCEL"
+  | "FILL_OR_KILL"
+  | "IMMEDIATE_OR_CANCEL"
+  | "END_OF_WEEK"
+  | "END_OF_MONTH"
+  | "NEXT_END_OF_MONTH";
 
 export interface OrderLeg {
   instruction: OrderInstruction;
@@ -280,7 +287,7 @@ export const OrderBuilder = {
    * Set order to Good 'Til Canceled
    */
   withGTC(order: OrderSpec): OrderSpec {
-    return { ...order, duration: "GTC" };
+    return { ...order, duration: "GOOD_TILL_CANCEL" };
   },
 
   /**

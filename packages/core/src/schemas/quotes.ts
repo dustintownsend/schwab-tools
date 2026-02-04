@@ -22,6 +22,26 @@ export const Quote = Schema.Struct({
 });
 export type Quote = typeof Quote.Type;
 
+export const QuoteField = Schema.Literal(
+  "all",
+  "quote",
+  "fundamental",
+  "extended",
+  "reference",
+  "regular"
+);
+export type QuoteField = typeof QuoteField.Type;
+
+export const QuoteRequestParams = Schema.Struct({
+  symbols: Schema.optional(Schema.Array(Schema.String)),
+  cusips: Schema.optional(Schema.Array(Schema.String)),
+  ssids: Schema.optional(Schema.Array(Schema.String)),
+  fields: Schema.optional(Schema.Array(QuoteField)),
+  indicative: Schema.optional(Schema.Boolean),
+  realtime: Schema.optional(Schema.Boolean),
+});
+export type QuoteRequestParams = typeof QuoteRequestParams.Type;
+
 // Candle
 export const Candle = Schema.Struct({
   open: Schema.Number,
@@ -55,6 +75,13 @@ export const SessionHours = Schema.Struct({
   regularMarket: Schema.optional(Schema.Array(SessionHoursEntry)),
   postMarket: Schema.optional(Schema.Array(SessionHoursEntry)),
 });
+export type SessionHours = typeof SessionHours.Type;
+
+export const SessionHoursByType = Schema.Record({
+  key: Schema.String,
+  value: Schema.Array(SessionHoursEntry),
+});
+export type SessionHoursByType = typeof SessionHoursByType.Type;
 
 // Market Hours
 export const MarketHours = Schema.Struct({
@@ -62,7 +89,7 @@ export const MarketHours = Schema.Struct({
   marketType: Schema.String,
   isOpen: Schema.Boolean,
   date: Schema.String,
-  sessionHours: Schema.optional(SessionHours),
+  sessionHours: Schema.optional(SessionHoursByType),
 });
 export type MarketHours = typeof MarketHours.Type;
 
@@ -71,37 +98,37 @@ export const SchwabQuoteData = Schema.Struct({
   "52WeekHigh": Schema.optional(Schema.Number),
   "52WeekLow": Schema.optional(Schema.Number),
   askMICId: Schema.optional(Schema.String),
-  askPrice: Schema.Number,
-  askSize: Schema.Number,
+  askPrice: Schema.optional(Schema.Number),
+  askSize: Schema.optional(Schema.Number),
   askTime: Schema.optional(Schema.Number),
   bidMICId: Schema.optional(Schema.String),
-  bidPrice: Schema.Number,
-  bidSize: Schema.Number,
+  bidPrice: Schema.optional(Schema.Number),
+  bidSize: Schema.optional(Schema.Number),
   bidTime: Schema.optional(Schema.Number),
-  closePrice: Schema.Number,
-  highPrice: Schema.Number,
+  closePrice: Schema.optional(Schema.Number),
+  highPrice: Schema.optional(Schema.Number),
   lastMICId: Schema.optional(Schema.String),
-  lastPrice: Schema.Number,
-  lastSize: Schema.Number,
-  lowPrice: Schema.Number,
-  mark: Schema.Number,
+  lastPrice: Schema.optional(Schema.Number),
+  lastSize: Schema.optional(Schema.Number),
+  lowPrice: Schema.optional(Schema.Number),
+  mark: Schema.optional(Schema.Number),
   markChange: Schema.optional(Schema.Number),
   markPercentChange: Schema.optional(Schema.Number),
-  netChange: Schema.Number,
-  netPercentChange: Schema.Number,
-  openPrice: Schema.Number,
+  netChange: Schema.optional(Schema.Number),
+  netPercentChange: Schema.optional(Schema.Number),
+  openPrice: Schema.optional(Schema.Number),
   postMarketChange: Schema.optional(Schema.Number),
   postMarketPercentChange: Schema.optional(Schema.Number),
   quoteTime: Schema.optional(Schema.Number),
   securityStatus: Schema.optional(Schema.String),
-  totalVolume: Schema.Number,
+  totalVolume: Schema.optional(Schema.Number),
   tradeTime: Schema.optional(Schema.Number),
 });
 
 export const SchwabReference = Schema.Struct({
   cusip: Schema.optional(Schema.String),
-  description: Schema.String,
-  exchange: Schema.String,
+  description: Schema.optional(Schema.String),
+  exchange: Schema.optional(Schema.String),
   exchangeName: Schema.optional(Schema.String),
 });
 

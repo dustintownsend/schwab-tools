@@ -57,7 +57,7 @@ export const mockOrders: readonly Order[] = [
     accountNumber: "12345678",
     orderType: "LIMIT",
     session: "NORMAL",
-    duration: "GTC",
+    duration: "GOOD_TILL_CANCEL",
     price: 2.50,
     orderLegCollection: [
       {

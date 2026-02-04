@@ -1,7 +1,12 @@
 /**
  * Test fixtures for option chain-related tests
  */
-import type { OptionChain, CompactOptionChain, OptionContract } from "../../src/schemas/index.js";
+import type {
+  OptionChain,
+  CompactOptionChain,
+  OptionContract,
+  Expiration,
+} from "../../src/schemas/index.js";
 
 export const mockOptionContract: OptionContract = {
   symbol: "AAPL  240119C00180000",
@@ -214,6 +219,23 @@ export const mockCompactOptionChain: CompactOptionChain = {
     },
   ],
 };
+
+export const mockExpirationChain: readonly Expiration[] = [
+  {
+    expirationDate: "2024-01-19",
+    daysToExpiration: 4,
+    expirationType: "S",
+    standard: true,
+    settlementType: "P",
+  },
+  {
+    expirationDate: "2024-02-16",
+    daysToExpiration: 32,
+    expirationType: "S",
+    standard: true,
+    settlementType: "P",
+  },
+];
 
 /**
  * Mock Schwab API option chain response

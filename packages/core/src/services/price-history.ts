@@ -29,11 +29,7 @@ interface SchwabMarketHoursInfo {
   date: string;
   marketType: string;
   isOpen: boolean;
-  sessionHours?: {
-    preMarket?: { start: string; end: string }[];
-    regularMarket?: { start: string; end: string }[];
-    postMarket?: { start: string; end: string }[];
-  };
+  sessionHours?: Record<string, { start: string; end: string }[]>;
 }
 
 interface SchwabMarketHoursResponse {
@@ -48,14 +44,23 @@ const PERIOD_MAP: Record<
   { periodType: string; period: number }
 > = {
   "1d": { periodType: "day", period: 1 },
+  "2d": { periodType: "day", period: 2 },
+  "3d": { periodType: "day", period: 3 },
+  "4d": { periodType: "day", period: 4 },
   "5d": { periodType: "day", period: 5 },
+  "10d": { periodType: "day", period: 10 },
   "1mo": { periodType: "month", period: 1 },
+  "2mo": { periodType: "month", period: 2 },
   "3mo": { periodType: "month", period: 3 },
   "6mo": { periodType: "month", period: 6 },
   "1y": { periodType: "year", period: 1 },
+  "2y": { periodType: "year", period: 2 },
+  "3y": { periodType: "year", period: 3 },
   "5y": { periodType: "year", period: 5 },
   "10y": { periodType: "year", period: 10 },
+  "15y": { periodType: "year", period: 15 },
   "20y": { periodType: "year", period: 20 },
+  ytd: { periodType: "ytd", period: 1 },
 };
 
 const FREQUENCY_MAP: Record<
@@ -64,6 +69,7 @@ const FREQUENCY_MAP: Record<
 > = {
   "1min": { frequencyType: "minute", frequency: 1 },
   "5min": { frequencyType: "minute", frequency: 5 },
+  "10min": { frequencyType: "minute", frequency: 10 },
   "15min": { frequencyType: "minute", frequency: 15 },
   "30min": { frequencyType: "minute", frequency: 30 },
   "1d": { frequencyType: "daily", frequency: 1 },
@@ -82,6 +88,26 @@ const mapCandle = (candle: SchwabCandle): Candle => ({
 });
 
 const formatDate = (date: Date): string => date.toISOString().split("T")[0];
+
+const mapMarketHoursResponse = (
+  response: SchwabMarketHoursResponse
+): MarketHours[] => {
+  const result: MarketHours[] = [];
+
+  for (const [market, types] of Object.entries(response)) {
+    for (const [, info] of Object.entries(types)) {
+      result.push({
+        market: market.toUpperCase() as MarketType,
+        marketType: info.marketType,
+        isOpen: info.isOpen,
+        date: info.date,
+        sessionHours: info.sessionHours,
+      });
+    }
+  }
+
+  return result;
+};
 
 /**
  * Create the Price History service implementation
@@ -143,7 +169,7 @@ const makePriceHistoryService = Effect.gen(function* () {
   const getMarketHours = (markets: readonly MarketType[], date?: Date) =>
     Effect.gen(function* () {
       const dateStr = date ? formatDate(date) : formatDate(new Date());
-      const marketList = markets.map((m) => m.toLowerCase()).join(",");
+      const marketList = markets.map((m) => m.toLowerCase());
 
       const response = yield* httpClient.request<SchwabMarketHoursResponse>({
         method: "GET",
@@ -154,26 +180,28 @@ const makePriceHistoryService = Effect.gen(function* () {
         },
       });
 
-      const result: MarketHours[] = [];
+      return mapMarketHoursResponse(response);
+    });
 
-      for (const [market, types] of Object.entries(response)) {
-        for (const [, info] of Object.entries(types)) {
-          result.push({
-            market: market.toUpperCase() as MarketType,
-            marketType: info.marketType,
-            isOpen: info.isOpen,
-            date: info.date,
-            sessionHours: info.sessionHours,
-          });
-        }
-      }
+  const getMarketHour = (market: MarketType, date?: Date) =>
+    Effect.gen(function* () {
+      const dateStr = date ? formatDate(date) : formatDate(new Date());
 
-      return result;
+      const response = yield* httpClient.request<SchwabMarketHoursResponse>({
+        method: "GET",
+        path: `/marketdata/v1/markets/${market.toLowerCase()}`,
+        params: {
+          date: dateStr,
+        },
+      });
+
+      return mapMarketHoursResponse(response);
     });
 
   return {
     getPriceHistory,
     getMarketHours,
+    getMarketHour,
   };
 });
 

@@ -8,7 +8,10 @@ import {
   AccountService,
   QuoteService,
   PriceHistoryService,
+  MoverService,
+  InstrumentService,
   OptionChainService,
+  UserPreferenceService,
   OrderService,
 } from "../services/index.js";
 import { ConfigLive, type ConfigOptions } from "../services/config.js";
@@ -19,7 +22,9 @@ import { HttpClientLive } from "../services/http-client.js";
 import { AccountServiceLive } from "../services/accounts.js";
 import { QuoteServiceLive } from "../services/quotes.js";
 import { PriceHistoryServiceLive } from "../services/price-history.js";
+import { MoverServiceLive, InstrumentServiceLive } from "../services/market-tools.js";
 import { OptionChainServiceLive } from "../services/options.js";
+import { UserPreferenceServiceLive } from "../services/user-preferences.js";
 import { OrderServiceLive } from "../services/orders.js";
 import type { ConfigError, FileSystemError, SchwabClientError } from "../errors.js";
 
@@ -40,7 +45,10 @@ export type SchwabServices =
   | AccountService
   | QuoteService
   | PriceHistoryService
+  | MoverService
+  | InstrumentService
   | OptionChainService
+  | UserPreferenceService
   | OrderService;
 
 /**
@@ -50,7 +58,10 @@ const DomainServicesLive = Layer.mergeAll(
   AccountServiceLive,
   QuoteServiceLive,
   PriceHistoryServiceLive,
+  MoverServiceLive,
+  InstrumentServiceLive,
   OptionChainServiceLive,
+  UserPreferenceServiceLive,
   OrderServiceLive
 );
 
@@ -126,6 +137,9 @@ export {
   AccountServiceLive,
   QuoteServiceLive,
   PriceHistoryServiceLive,
+  MoverServiceLive,
+  InstrumentServiceLive,
   OptionChainServiceLive,
+  UserPreferenceServiceLive,
   OrderServiceLive,
 };

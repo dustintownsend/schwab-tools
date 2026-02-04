@@ -19,20 +19,36 @@ interface SchwabErrorResponse {
   error_description?: string;
 }
 
+const createCorrelationId = (): string => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `schwab-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
 /**
  * Build URL with query parameters
  */
 const buildUrl = (
   baseUrl: string,
   path: string,
-  params?: Record<string, string | number | boolean | undefined>
+  params?: Record<
+    string,
+    string | number | boolean | readonly (string | number | boolean)[] | undefined
+  >
 ): string => {
   const url = new URL(path, baseUrl);
 
   if (params) {
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined) {
-        url.searchParams.set(key, String(value));
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            url.searchParams.append(key, String(item));
+          }
+        } else {
+          url.searchParams.set(key, String(value));
+        }
       }
     }
   }
@@ -210,8 +226,38 @@ const makeHttpClient = Effect.gen(function* () {
       // Build URL
       const url = buildUrl(config.baseUrl, requestConfig.path, requestConfig.params);
 
+      const defaultHeaders: Record<string, string> = {
+        "Schwab-Client-CorrelId": createCorrelationId(),
+      };
+      if (config.schwabClientAppId) {
+        defaultHeaders["Schwab-Client-AppId"] = config.schwabClientAppId;
+      }
+      if (config.schwabClientChannel) {
+        defaultHeaders["Schwab-Client-Channel"] = config.schwabClientChannel;
+      }
+      if (config.schwabClientFunctionId) {
+        defaultHeaders["Schwab-Client-FunctionId"] = config.schwabClientFunctionId;
+      }
+      if (config.schwabResourceVersion) {
+        defaultHeaders["Schwab-Resource-Version"] = config.schwabResourceVersion;
+      }
+      if (config.schwabThirdPartyId) {
+        defaultHeaders.ThirdPartyId = config.schwabThirdPartyId;
+      }
+      if (config.schwabPilotRollout) {
+        defaultHeaders["Schwab-RRBus-PilotRollout"] = config.schwabPilotRollout;
+      }
+
+      const requestWithHeaders: RequestConfig = {
+        ...requestConfig,
+        headers: {
+          ...defaultHeaders,
+          ...requestConfig.headers,
+        },
+      };
+
       // Execute request with retry
-      const result = yield* executeRequest<T>(url, requestConfig, accessToken).pipe(
+      const result = yield* executeRequest<T>(url, requestWithHeaders, accessToken).pipe(
         Effect.retry(retrySchedule)
       );
 

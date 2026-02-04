@@ -191,11 +191,11 @@ describe("OrderBuilder - Spread Orders", () => {
 
 describe("OrderBuilder - Order Modifiers", () => {
   describe("withGTC", () => {
-    it("changes duration to GTC", () => {
+    it("changes duration to GOOD_TILL_CANCEL", () => {
       const order = OrderBuilder.equityBuyLimit("AAPL", 100, 175.00);
       const gtcOrder = OrderBuilder.withGTC(order);
 
-      expect(gtcOrder.duration).toBe("GTC");
+      expect(gtcOrder.duration).toBe("GOOD_TILL_CANCEL");
       // Original order unchanged
       expect(order.duration).toBe("DAY");
     });
@@ -239,7 +239,7 @@ describe("OrderBuilder - Order Modifiers", () => {
         )
       );
 
-      expect(order.duration).toBe("GTC");
+      expect(order.duration).toBe("GOOD_TILL_CANCEL");
       expect(order.session).toBe("SEAMLESS");
       expect(order.orderType).toBe("LIMIT");
       expect(order.price).toBe(175.00);

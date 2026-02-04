@@ -191,6 +191,16 @@ describe("AccountService", () => {
       expect(result[0].transactionDate).toBeInstanceOf(Date);
       expect(result[0].settlementDate).toBeInstanceOf(Date);
     });
+
+    it("returns a specific transaction by ID", async () => {
+      const program = Effect.gen(function* () {
+        const service = yield* AccountService;
+        return yield* service.getTransaction("ABC123HASH", "TX001");
+      });
+
+      const result = await Effect.runPromise(program.pipe(Effect.provide(testLayer)));
+      expect(result.transactionId).toBe("TX001");
+    });
   });
 
   describe("empty data handling", () => {

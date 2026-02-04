@@ -32,7 +32,30 @@ export const orderTools = [
         },
         status: {
           type: "string",
-          enum: ["WORKING", "FILLED", "CANCELED", "REJECTED", "EXPIRED", "ALL"],
+          enum: [
+            "AWAITING_PARENT_ORDER",
+            "AWAITING_CONDITION",
+            "AWAITING_STOP_CONDITION",
+            "AWAITING_MANUAL_REVIEW",
+            "ACCEPTED",
+            "AWAITING_UR_OUT",
+            "PENDING_ACTIVATION",
+            "QUEUED",
+            "WORKING",
+            "REJECTED",
+            "PENDING_CANCEL",
+            "CANCELED",
+            "PENDING_REPLACE",
+            "REPLACED",
+            "FILLED",
+            "EXPIRED",
+            "NEW",
+            "AWAITING_RELEASE_TIME",
+            "PENDING_ACKNOWLEDGEMENT",
+            "PENDING_RECALL",
+            "UNKNOWN",
+            "ALL",
+          ],
           description: "Filter by order status (default: ALL)",
         },
         maxResults: {
@@ -105,7 +128,7 @@ export const orderTools = [
         },
         duration: {
           type: "string",
-          enum: ["DAY", "GTC"],
+          enum: ["DAY", "GOOD_TILL_CANCEL", "GTC"],
           description: "Order duration (default: DAY)",
         },
       },
@@ -128,6 +151,104 @@ export const orderTools = [
         },
       },
       required: ["accountHash", "orderId"],
+    },
+  },
+  {
+    name: "schwab_preview_order",
+    description: "Preview a stock or option order without placing it",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        accountHash: {
+          type: "string",
+          description: "Account hash",
+        },
+        action: {
+          type: "string",
+          enum: [
+            "BUY",
+            "SELL",
+            "BUY_TO_OPEN",
+            "SELL_TO_OPEN",
+            "BUY_TO_CLOSE",
+            "SELL_TO_CLOSE",
+          ],
+        },
+        symbol: {
+          type: "string",
+          description: "Stock symbol or OCC option symbol",
+        },
+        quantity: {
+          type: "number",
+          description: "Number of shares or contracts",
+        },
+        orderType: {
+          type: "string",
+          enum: ["MARKET", "LIMIT"],
+          description: "Order type (default: LIMIT)",
+        },
+        price: {
+          type: "number",
+          description: "Limit price (required for LIMIT orders)",
+        },
+        duration: {
+          type: "string",
+          enum: ["DAY", "GOOD_TILL_CANCEL", "GTC"],
+          description: "Order duration (default: DAY)",
+        },
+      },
+      required: ["accountHash", "action", "symbol", "quantity"],
+    },
+  },
+  {
+    name: "schwab_replace_order",
+    description: "Replace an existing order",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        accountHash: {
+          type: "string",
+          description: "Account hash",
+        },
+        orderId: {
+          type: "string",
+          description: "Order ID to replace",
+        },
+        action: {
+          type: "string",
+          enum: [
+            "BUY",
+            "SELL",
+            "BUY_TO_OPEN",
+            "SELL_TO_OPEN",
+            "BUY_TO_CLOSE",
+            "SELL_TO_CLOSE",
+          ],
+        },
+        symbol: {
+          type: "string",
+          description: "Stock symbol or OCC option symbol",
+        },
+        quantity: {
+          type: "number",
+          description: "Number of shares or contracts",
+        },
+        orderType: {
+          type: "string",
+          enum: ["MARKET", "LIMIT"],
+          description: "Order type (default: LIMIT)",
+        },
+        price: {
+          type: "number",
+          description: "Limit price (required for LIMIT orders)",
+        },
+        duration: {
+          type: "string",
+          enum: ["DAY", "GOOD_TILL_CANCEL", "GTC"],
+          description: "Order duration (default: DAY)",
+        },
+      },
+      required: ["accountHash", "orderId", "action", "symbol", "quantity"],
     },
   },
 ];
@@ -163,6 +284,22 @@ const placeOrderProgram = (accountHash: string, order: OrderSpec) =>
     // Cast to any to bridge between core OrderSpec and effect OrderSpec types
     // (structurally identical, differ only in readonly modifier)
     return yield* orderService.placeOrder(accountHash, order as any);
+  });
+
+const previewOrderProgram = (accountHash: string, order: OrderSpec) =>
+  Effect.gen(function* () {
+    const orderService = yield* OrderService;
+    return yield* orderService.previewOrder(accountHash, order as any);
+  });
+
+const replaceOrderProgram = (
+  accountHash: string,
+  orderId: string,
+  order: OrderSpec
+) =>
+  Effect.gen(function* () {
+    const orderService = yield* OrderService;
+    return yield* orderService.replaceOrder(accountHash, orderId, order as any);
   });
 
 const cancelOrderProgram = (accountHash: string, orderId: string) =>
@@ -231,6 +368,91 @@ function formatOrder(order: Order) {
   };
 }
 
+function buildOrderSpecFromArgs(
+  args: Record<string, unknown>
+): Result<{ order: OrderSpec; action: OrderInstruction; symbol: string; quantity: number; orderType: "MARKET" | "LIMIT"; price?: number; duration: "DAY" | "GOOD_TILL_CANCEL" | "GTC" }> {
+  const action = args.action as OrderInstruction;
+  const symbol = args.symbol as string;
+  const quantity = args.quantity as number;
+  const orderType = (args.orderType as "MARKET" | "LIMIT") || "LIMIT";
+  const price = args.price as number | undefined;
+  const duration =
+    (args.duration as "DAY" | "GOOD_TILL_CANCEL" | "GTC" | undefined) ||
+    "DAY";
+
+  if (orderType === "LIMIT" && price === undefined) {
+    return {
+      success: false,
+      error: "Limit orders require a price",
+      errorType: "ValidationError",
+    };
+  }
+
+  const isOption = isOptionSymbol(symbol);
+  let order: OrderSpec;
+
+  try {
+    if (isOption) {
+      switch (action) {
+        case "BUY_TO_OPEN":
+          order = OrderBuilder.optionBuyToOpen(symbol, quantity, price);
+          break;
+        case "SELL_TO_OPEN":
+          order = OrderBuilder.optionSellToOpen(symbol, quantity, price);
+          break;
+        case "BUY_TO_CLOSE":
+          order = OrderBuilder.optionBuyToClose(symbol, quantity, price);
+          break;
+        case "SELL_TO_CLOSE":
+          order = OrderBuilder.optionSellToClose(symbol, quantity, price);
+          break;
+        default:
+          return {
+            success: false,
+            error: `Invalid action for option: ${action}. Use BUY_TO_OPEN, SELL_TO_OPEN, BUY_TO_CLOSE, or SELL_TO_CLOSE`,
+            errorType: "ValidationError",
+          };
+      }
+    } else {
+      switch (action) {
+        case "BUY":
+          order =
+            price !== undefined
+              ? OrderBuilder.equityBuyLimit(symbol, quantity, price)
+              : OrderBuilder.equityBuy(symbol, quantity);
+          break;
+        case "SELL":
+          order =
+            price !== undefined
+              ? OrderBuilder.equitySellLimit(symbol, quantity, price)
+              : OrderBuilder.equitySell(symbol, quantity);
+          break;
+        default:
+          return {
+            success: false,
+            error: `Invalid action for equity: ${action}. Use BUY or SELL`,
+            errorType: "ValidationError",
+          };
+      }
+    }
+
+    if (duration === "GTC" || duration === "GOOD_TILL_CANCEL") {
+      order = OrderBuilder.withGTC(order as any) as any;
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+      errorType: "ValidationError",
+    };
+  }
+
+  return {
+    success: true,
+    data: { order, action, symbol, quantity, orderType, price, duration },
+  };
+}
+
 /**
  * Handle order tool calls
  */
@@ -274,82 +496,10 @@ export async function handleOrderTool(
 
     case "schwab_place_order": {
       const accountHash = args.accountHash as string;
-      const action = args.action as OrderInstruction;
-      const symbol = args.symbol as string;
-      const quantity = args.quantity as number;
-      const orderType = (args.orderType as "MARKET" | "LIMIT") || "LIMIT";
-      const price = args.price as number | undefined;
-      const duration = (args.duration as "DAY" | "GTC") || "DAY";
-
-      // Validate limit orders have price
-      if (orderType === "LIMIT" && price === undefined) {
-        return {
-          success: false,
-          error: "Limit orders require a price",
-          errorType: "ValidationError",
-        };
-      }
-
-      // Build the order based on action
-      let order: OrderSpec;
+      const built = buildOrderSpecFromArgs(args);
+      if (!built.success) return built;
+      const { order, action, symbol, quantity, orderType, price, duration } = built.data;
       const isOption = isOptionSymbol(symbol);
-
-      try {
-        if (isOption) {
-          switch (action) {
-            case "BUY_TO_OPEN":
-              order = OrderBuilder.optionBuyToOpen(symbol, quantity, price);
-              break;
-            case "SELL_TO_OPEN":
-              order = OrderBuilder.optionSellToOpen(symbol, quantity, price);
-              break;
-            case "BUY_TO_CLOSE":
-              order = OrderBuilder.optionBuyToClose(symbol, quantity, price);
-              break;
-            case "SELL_TO_CLOSE":
-              order = OrderBuilder.optionSellToClose(symbol, quantity, price);
-              break;
-            default:
-              return {
-                success: false,
-                error: `Invalid action for option: ${action}. Use BUY_TO_OPEN, SELL_TO_OPEN, BUY_TO_CLOSE, or SELL_TO_CLOSE`,
-                errorType: "ValidationError",
-              };
-          }
-        } else {
-          switch (action) {
-            case "BUY":
-              order =
-                price !== undefined
-                  ? OrderBuilder.equityBuyLimit(symbol, quantity, price)
-                  : OrderBuilder.equityBuy(symbol, quantity);
-              break;
-            case "SELL":
-              order =
-                price !== undefined
-                  ? OrderBuilder.equitySellLimit(symbol, quantity, price)
-                  : OrderBuilder.equitySell(symbol, quantity);
-              break;
-            default:
-              return {
-                success: false,
-                error: `Invalid action for equity: ${action}. Use BUY or SELL`,
-                errorType: "ValidationError",
-              };
-          }
-        }
-
-        // Apply duration
-        if (duration === "GTC") {
-          order = OrderBuilder.withGTC(order as any) as any;
-        }
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-          errorType: "ValidationError",
-        };
-      }
 
       const result = await runWithResult(placeOrderProgram(accountHash, order));
       if (!result.success) return result;
@@ -362,6 +512,31 @@ export async function handleOrderTool(
           details: {
             action,
             symbol: isOption ? formatOptionSymbol(symbol) : symbol,
+            quantity,
+            orderType,
+            price,
+            duration,
+          },
+        },
+      };
+    }
+
+    case "schwab_preview_order": {
+      const accountHash = args.accountHash as string;
+      const built = buildOrderSpecFromArgs(args);
+      if (!built.success) return built;
+      const { order, symbol, quantity, action, orderType, price, duration } = built.data;
+
+      const result = await runWithResult(previewOrderProgram(accountHash, order));
+      if (!result.success) return result;
+
+      return {
+        success: true,
+        data: {
+          preview: formatOrder(result.data),
+          request: {
+            action,
+            symbol: isOptionSymbol(symbol) ? formatOptionSymbol(symbol) : symbol,
             quantity,
             orderType,
             price,
@@ -384,6 +559,36 @@ export async function handleOrderTool(
         success: true,
         data: {
           message: `Order ${orderId} canceled`,
+        },
+      };
+    }
+
+    case "schwab_replace_order": {
+      const accountHash = args.accountHash as string;
+      const orderId = args.orderId as string;
+      const built = buildOrderSpecFromArgs(args);
+      if (!built.success) return built;
+      const { order, symbol, quantity, action, orderType, price, duration } = built.data;
+
+      const result = await runWithResult(
+        replaceOrderProgram(accountHash, orderId, order)
+      );
+      if (!result.success) return result;
+
+      return {
+        success: true,
+        data: {
+          orderId: result.data,
+          replacedOrderId: orderId,
+          message: "Order replaced successfully",
+          details: {
+            action,
+            symbol: isOptionSymbol(symbol) ? formatOptionSymbol(symbol) : symbol,
+            quantity,
+            orderType,
+            price,
+            duration,
+          },
         },
       };
     }

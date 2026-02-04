@@ -15,12 +15,18 @@ import type {
   Transaction,
   TransactionParams,
   Quote,
+  QuoteRequestParams,
   Candle,
   PriceHistoryParams,
   MarketHours,
+  Mover,
+  Instrument,
+  InstrumentProjection,
   OptionChain,
   OptionChainParams,
   CompactOptionChain,
+  Expiration,
+  UserPreference,
   Order,
   OrderSpec,
   OrderQueryParams,
@@ -39,6 +45,12 @@ export interface SchwabConfigShape {
   readonly baseUrl: string;
   readonly requestsPerMinute: number;
   readonly maxRetries: number;
+  readonly schwabClientAppId?: string;
+  readonly schwabClientChannel?: string;
+  readonly schwabClientFunctionId?: string;
+  readonly schwabResourceVersion?: string;
+  readonly schwabThirdPartyId?: string;
+  readonly schwabPilotRollout?: string;
 }
 
 export class SchwabConfig extends Context.Tag("SchwabConfig")<
@@ -134,7 +146,10 @@ export class RateLimiter extends Context.Tag("RateLimiter")<
 export interface RequestConfig {
   readonly method: HttpMethod;
   readonly path: string;
-  readonly params?: Record<string, string | number | boolean | undefined>;
+  readonly params?: Record<
+    string,
+    string | number | boolean | readonly (string | number | boolean)[] | undefined
+  >;
   readonly body?: unknown;
   readonly headers?: Record<string, string>;
 }
@@ -171,6 +186,10 @@ export interface AccountServiceShape {
     accountHash: string,
     params?: TransactionParams
   ) => Effect.Effect<readonly Transaction[], SchwabClientError>;
+  readonly getTransaction: (
+    accountHash: string,
+    transactionId: string
+  ) => Effect.Effect<Transaction, SchwabClientError>;
 }
 
 export class AccountService extends Context.Tag("AccountService")<
@@ -184,10 +203,15 @@ export class AccountService extends Context.Tag("AccountService")<
 
 export interface QuoteServiceShape {
   readonly getQuotes: (
-    symbols: readonly string[]
+    symbols: readonly string[],
+    options?: Omit<QuoteRequestParams, "symbols" | "cusips" | "ssids">
   ) => Effect.Effect<readonly Quote[], SchwabClientError>;
+  readonly getQuotesByRequest: (
+    request: QuoteRequestParams
+  ) => Effect.Effect<readonly Quote[], SchwabClientError | SymbolNotFoundError>;
   readonly getQuote: (
-    symbol: string
+    symbol: string,
+    options?: Omit<QuoteRequestParams, "symbols" | "cusips" | "ssids">
   ) => Effect.Effect<Quote, SchwabClientError | SymbolNotFoundError>;
 }
 
@@ -209,11 +233,53 @@ export interface PriceHistoryServiceShape {
     markets: readonly MarketType[],
     date?: Date
   ) => Effect.Effect<readonly MarketHours[], SchwabClientError>;
+  readonly getMarketHour: (
+    market: MarketType,
+    date?: Date
+  ) => Effect.Effect<readonly MarketHours[], SchwabClientError>;
 }
 
 export class PriceHistoryService extends Context.Tag("PriceHistoryService")<
   PriceHistoryService,
   PriceHistoryServiceShape
+>() {}
+
+// ============================================================================
+// Movers Service
+// ============================================================================
+
+export interface MoverServiceShape {
+  readonly getMovers: (
+    symbol: string,
+    params?: {
+      sort?: "VOLUME" | "TRADES" | "PERCENT_CHANGE_UP" | "PERCENT_CHANGE_DOWN";
+      frequency?: 0 | 1 | 5 | 10 | 30 | 60;
+    }
+  ) => Effect.Effect<readonly Mover[], SchwabClientError>;
+}
+
+export class MoverService extends Context.Tag("MoverService")<
+  MoverService,
+  MoverServiceShape
+>() {}
+
+// ============================================================================
+// Instruments Service
+// ============================================================================
+
+export interface InstrumentServiceShape {
+  readonly getInstruments: (
+    symbol: string,
+    projection: InstrumentProjection
+  ) => Effect.Effect<readonly Instrument[], SchwabClientError>;
+  readonly getInstrumentByCusip: (
+    cusip: string
+  ) => Effect.Effect<Instrument, SchwabClientError>;
+}
+
+export class InstrumentService extends Context.Tag("InstrumentService")<
+  InstrumentService,
+  InstrumentServiceShape
 >() {}
 
 // ============================================================================
@@ -229,11 +295,30 @@ export interface OptionChainServiceShape {
     symbol: string,
     params?: OptionChainParams & { expirationDays?: number }
   ) => Effect.Effect<CompactOptionChain, SchwabClientError>;
+  readonly getExpirationChain: (
+    symbol: string
+  ) => Effect.Effect<readonly Expiration[], SchwabClientError>;
 }
 
 export class OptionChainService extends Context.Tag("OptionChainService")<
   OptionChainService,
   OptionChainServiceShape
+>() {}
+
+// ============================================================================
+// User Preference Service
+// ============================================================================
+
+export interface UserPreferenceServiceShape {
+  readonly getUserPreference: Effect.Effect<
+    readonly UserPreference[],
+    SchwabClientError
+  >;
+}
+
+export class UserPreferenceService extends Context.Tag("UserPreferenceService")<
+  UserPreferenceService,
+  UserPreferenceServiceShape
 >() {}
 
 // ============================================================================

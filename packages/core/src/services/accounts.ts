@@ -1,6 +1,6 @@
 import { Effect, Layer, Ref, Schema } from "effect";
 import { AccountService, HttpClient } from "./index.js";
-import { AccountNotFoundError } from "../errors.js";
+import { AccountNotFoundError, ApiError } from "../errors.js";
 import { decode } from "../validation.js";
 import {
   type Account,
@@ -9,6 +9,7 @@ import {
   type Position,
   type Transaction,
   type TransactionParams,
+  type TransactionType,
   type AccountType,
   type AssetType,
   SchwabAccountNumber,
@@ -22,6 +23,27 @@ import {
 const SchwabAccountNumberArray = Schema.Array(SchwabAccountNumber);
 const SchwabAccountArray = Schema.Array(SchwabAccount);
 const SchwabTransactionArray = Schema.Array(SchwabTransaction);
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_TRANSACTION_LOOKBACK_DAYS = 30;
+const MAX_TRANSACTION_RANGE_DAYS = 365;
+const DEFAULT_TRANSACTION_TYPES: readonly TransactionType[] = [
+  "TRADE",
+  "RECEIVE_AND_DELIVER",
+  "DIVIDEND_OR_INTEREST",
+  "ACH_RECEIPT",
+  "ACH_DISBURSEMENT",
+  "CASH_RECEIPT",
+  "CASH_DISBURSEMENT",
+  "ELECTRONIC_FUND",
+  "WIRE_IN",
+  "WIRE_OUT",
+  "JOURNAL",
+  "MEMORANDUM",
+  "MARGIN_CALL",
+  "MONEY_MARKET",
+  "SMA_ADJUSTMENT",
+];
 
 // Mappers
 const mapAccountType = (type: string): AccountType => {
@@ -48,8 +70,20 @@ const mapAssetType = (type: string): AssetType => {
       return "CASH_EQUIVALENT";
     case "FIXED_INCOME":
       return "FIXED_INCOME";
+    case "FUTURE":
+      return "FUTURE";
+    case "FOREX":
+      return "FOREX";
+    case "INDEX":
+      return "INDEX";
+    case "PRODUCT":
+      return "PRODUCT";
+    case "CURRENCY":
+      return "CURRENCY";
+    case "COLLECTIVE_INVESTMENT":
+      return "COLLECTIVE_INVESTMENT";
     default:
-      return "EQUITY";
+      return "UNKNOWN";
   }
 };
 
@@ -178,9 +212,10 @@ const makeAccountService = Effect.gen(function* () {
 
   const getAccount = (accountHash: string) =>
     Effect.gen(function* () {
+      const encodedAccountHash = encodeURIComponent(accountHash);
       const rawResponse = yield* httpClient.request<unknown>({
         method: "GET",
-        path: `/trader/v1/accounts/${accountHash}`,
+        path: `/trader/v1/accounts/${encodedAccountHash}`,
         params: {
           fields: "positions",
         },
@@ -198,6 +233,9 @@ const makeAccountService = Effect.gen(function* () {
 
   const getAccounts = Effect.gen(function* () {
     const accountNumbers = yield* getAccountNumbers;
+    const accountHashByNumber = new Map(
+      accountNumbers.map((account) => [account.accountNumber, account.hashValue])
+    );
 
     const rawResponse = yield* httpClient.request<unknown>({
       method: "GET",
@@ -214,32 +252,45 @@ const makeAccountService = Effect.gen(function* () {
       "Accounts API response"
     );
 
-    return response.map((account, index) => {
-      const hash = accountNumbers[index]?.hashValue ?? "";
+    return response.map((account) => {
+      const hash =
+        accountHashByNumber.get(account.securitiesAccount.accountNumber) ?? "";
       return mapAccount(account, hash);
     });
   });
 
   const getTransactions = (accountHash: string, params?: TransactionParams) =>
     Effect.gen(function* () {
-      const queryParams: Record<string, string | undefined> = {};
+      const encodedAccountHash = encodeURIComponent(accountHash);
+      const endDate = params?.endDate ?? new Date();
+      const startDateRaw =
+        params?.startDate ??
+        new Date(endDate.getTime() - DEFAULT_TRANSACTION_LOOKBACK_DAYS * DAY_MS);
+      const minStartDate = new Date(
+        endDate.getTime() - MAX_TRANSACTION_RANGE_DAYS * DAY_MS
+      );
+      const startDate =
+        startDateRaw.getTime() < minStartDate.getTime()
+          ? minStartDate
+          : startDateRaw;
+      const types =
+        params?.types && params.types.length > 0
+          ? params.types
+          : DEFAULT_TRANSACTION_TYPES;
 
-      if (params?.startDate) {
-        queryParams.startDate = params.startDate.toISOString().split("T")[0];
-      }
-      if (params?.endDate) {
-        queryParams.endDate = params.endDate.toISOString().split("T")[0];
-      }
-      if (params?.types && params.types.length > 0) {
-        queryParams.types = params.types.join(",");
-      }
+      const queryParams: Record<string, string | undefined> = {
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        types: types.join(","),
+      };
+
       if (params?.symbol) {
         queryParams.symbol = params.symbol;
       }
 
       const rawResponse = yield* httpClient.request<unknown>({
         method: "GET",
-        path: `/trader/v1/accounts/${accountHash}/transactions`,
+        path: `/trader/v1/accounts/${encodedAccountHash}/transactions`,
         params: queryParams,
       });
 
@@ -253,12 +304,44 @@ const makeAccountService = Effect.gen(function* () {
       return response.map(mapTransaction);
     });
 
+  const getTransaction = (accountHash: string, transactionId: string) =>
+    Effect.gen(function* () {
+      const encodedAccountHash = encodeURIComponent(accountHash);
+      const encodedTransactionId = encodeURIComponent(transactionId);
+      const rawResponse = yield* httpClient.request<unknown>({
+        method: "GET",
+        path: `/trader/v1/accounts/${encodedAccountHash}/transactions/${encodedTransactionId}`,
+      });
+
+      // Endpoint may return either a single object or a singleton array.
+      const normalized = Array.isArray(rawResponse) ? rawResponse[0] : rawResponse;
+      if (!normalized) {
+        return yield* Effect.fail(
+          new ApiError({
+            statusCode: 404,
+            endpoint: `/trader/v1/accounts/${encodedAccountHash}/transactions/${encodedTransactionId}`,
+            method: "GET",
+            message: `Transaction ${transactionId} not found`,
+          })
+        );
+      }
+
+      const response = yield* decode(
+        SchwabTransaction,
+        normalized,
+        "Transaction API response"
+      );
+
+      return mapTransaction(response);
+    });
+
   return {
     getAccountNumbers,
     getAccountHash,
     getAccount,
     getAccounts,
     getTransactions,
+    getTransaction,
   };
 });
 

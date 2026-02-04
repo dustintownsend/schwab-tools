@@ -6,6 +6,8 @@ import {
   Effect,
   QuoteService,
   PriceHistoryService,
+  MoverService,
+  InstrumentService,
   runSchwab,
   formatError,
   type Quote,
@@ -14,6 +16,8 @@ import {
   type PriceHistoryPeriod,
   type PriceHistoryFrequency,
   type MarketType,
+  type InstrumentProjection,
+  type QuoteRequestParams,
   type SchwabClientError,
 } from "@schwab-tools/core";
 
@@ -31,8 +35,45 @@ export const marketDataTools = [
           items: { type: "string" },
           description: "Stock/ETF symbols (e.g., ['AAPL', 'TSLA'])",
         },
+        cusips: {
+          type: "array",
+          items: { type: "string" },
+          description: "CUSIP identifiers",
+        },
+        ssids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Schwab security identifiers (SSIDs)",
+        },
+        fields: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: [
+              "all",
+              "quote",
+              "fundamental",
+              "extended",
+              "reference",
+              "regular",
+            ],
+          },
+          description: "Optional quote field subsets",
+        },
+        indicative: {
+          type: "boolean",
+          description: "Include indicative ETF symbols (e.g., $ABC.IV)",
+        },
+        realtime: {
+          type: "boolean",
+          description: "Advisor-token-only realtime bypass flag",
+        },
       },
-      required: ["symbols"],
+      anyOf: [
+        { required: ["symbols"] },
+        { required: ["cusips"] },
+        { required: ["ssids"] },
+      ],
     },
   },
   {
@@ -48,12 +89,31 @@ export const marketDataTools = [
         },
         period: {
           type: "string",
-          enum: ["1d", "5d", "1mo", "3mo", "6mo", "1y", "5y", "10y", "20y"],
+          enum: [
+            "1d",
+            "2d",
+            "3d",
+            "4d",
+            "5d",
+            "10d",
+            "1mo",
+            "2mo",
+            "3mo",
+            "6mo",
+            "1y",
+            "2y",
+            "3y",
+            "5y",
+            "10y",
+            "15y",
+            "20y",
+            "ytd",
+          ],
           description: "Time period (default: 1mo)",
         },
         frequency: {
           type: "string",
-          enum: ["1min", "5min", "15min", "30min", "1d", "1w", "1mo"],
+          enum: ["1min", "5min", "10min", "15min", "30min", "1d", "1w", "1mo"],
           description: "Candle frequency (default: 1d)",
         },
       },
@@ -82,13 +142,97 @@ export const marketDataTools = [
       },
     },
   },
+  {
+    name: "schwab_get_market_hour",
+    description: "Get market hours for a single market",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        market: {
+          type: "string",
+          enum: ["EQUITY", "OPTION", "BOND", "FUTURE", "FOREX"],
+          description: "Single market to query",
+        },
+        date: {
+          type: "string",
+          description: "Date in YYYY-MM-DD format (default: today)",
+        },
+      },
+      required: ["market"],
+    },
+  },
+  {
+    name: "schwab_get_movers",
+    description: "Get top movers for a supported index",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        symbol: {
+          type: "string",
+          description:
+            "Index symbol (e.g., $DJI, $COMPX, $SPX, NYSE, NASDAQ)",
+        },
+        sort: {
+          type: "string",
+          enum: ["VOLUME", "TRADES", "PERCENT_CHANGE_UP", "PERCENT_CHANGE_DOWN"],
+          description: "Sort criteria",
+        },
+        frequency: {
+          type: "number",
+          enum: [0, 1, 5, 10, 30, 60],
+          description: "Mover frequency interval",
+        },
+      },
+      required: ["symbol"],
+    },
+  },
+  {
+    name: "schwab_get_instruments",
+    description: "Search instruments by symbol and projection",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        symbol: {
+          type: "string",
+          description: "Symbol search input",
+        },
+        projection: {
+          type: "string",
+          enum: [
+            "symbol-search",
+            "symbol-regex",
+            "desc-search",
+            "desc-regex",
+            "search",
+            "fundamental",
+          ],
+          description: "Projection mode",
+        },
+      },
+      required: ["symbol", "projection"],
+    },
+  },
+  {
+    name: "schwab_get_instrument_by_cusip",
+    description: "Get a single instrument by CUSIP",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        cusip: {
+          type: "string",
+          description: "CUSIP identifier",
+        },
+      },
+      required: ["cusip"],
+    },
+  },
 ];
 
 // Effect programs for each tool
-const getQuotesProgram = (symbols: readonly string[]) =>
+const getQuotesProgram = (request: QuoteRequestParams) =>
   Effect.gen(function* () {
     const quoteService = yield* QuoteService;
-    return yield* quoteService.getQuotes(symbols);
+    return yield* quoteService.getQuotesByRequest(request);
   });
 
 const getPriceHistoryProgram = (
@@ -108,6 +252,39 @@ const getMarketHoursProgram = (markets: readonly MarketType[], date?: Date) =>
   Effect.gen(function* () {
     const priceHistoryService = yield* PriceHistoryService;
     return yield* priceHistoryService.getMarketHours(markets, date);
+  });
+
+const getMarketHourProgram = (market: MarketType, date?: Date) =>
+  Effect.gen(function* () {
+    const priceHistoryService = yield* PriceHistoryService;
+    return yield* priceHistoryService.getMarketHour(market, date);
+  });
+
+const getMoversProgram = (
+  symbol: string,
+  params?: {
+    sort?: "VOLUME" | "TRADES" | "PERCENT_CHANGE_UP" | "PERCENT_CHANGE_DOWN";
+    frequency?: 0 | 1 | 5 | 10 | 30 | 60;
+  }
+) =>
+  Effect.gen(function* () {
+    const moverService = yield* MoverService;
+    return yield* moverService.getMovers(symbol, params);
+  });
+
+const getInstrumentsProgram = (
+  symbol: string,
+  projection: InstrumentProjection
+) =>
+  Effect.gen(function* () {
+    const instrumentService = yield* InstrumentService;
+    return yield* instrumentService.getInstruments(symbol, projection);
+  });
+
+const getInstrumentByCusipProgram = (cusip: string) =>
+  Effect.gen(function* () {
+    const instrumentService = yield* InstrumentService;
+    return yield* instrumentService.getInstrumentByCusip(cusip);
   });
 
 // Result types for structured responses
@@ -151,8 +328,24 @@ export async function handleMarketDataTool(
 ): Promise<Result<unknown>> {
   switch (name) {
     case "schwab_get_quote": {
-      const symbols = args.symbols as string[];
-      return runWithResult(getQuotesProgram(symbols));
+      const symbols = args.symbols as string[] | undefined;
+      const cusips = args.cusips as string[] | undefined;
+      const ssids = args.ssids as string[] | undefined;
+      const fields = args.fields as
+        | ("all" | "quote" | "fundamental" | "extended" | "reference" | "regular")[]
+        | undefined;
+      const indicative = args.indicative as boolean | undefined;
+      const realtime = args.realtime as boolean | undefined;
+      return runWithResult(
+        getQuotesProgram({
+          symbols,
+          cusips,
+          ssids,
+          fields,
+          indicative,
+          realtime,
+        })
+      );
     }
 
     case "schwab_get_price_history": {
@@ -168,6 +361,35 @@ export async function handleMarketDataTool(
         ? new Date(args.date as string)
         : undefined;
       return runWithResult(getMarketHoursProgram(markets, date));
+    }
+
+    case "schwab_get_market_hour": {
+      const market = args.market as MarketType;
+      const date = args.date ? new Date(args.date as string) : undefined;
+      return runWithResult(getMarketHourProgram(market, date));
+    }
+
+    case "schwab_get_movers": {
+      const symbol = args.symbol as string;
+      const sort = args.sort as
+        | "VOLUME"
+        | "TRADES"
+        | "PERCENT_CHANGE_UP"
+        | "PERCENT_CHANGE_DOWN"
+        | undefined;
+      const frequency = args.frequency as 0 | 1 | 5 | 10 | 30 | 60 | undefined;
+      return runWithResult(getMoversProgram(symbol, { sort, frequency }));
+    }
+
+    case "schwab_get_instruments": {
+      const symbol = args.symbol as string;
+      const projection = args.projection as InstrumentProjection;
+      return runWithResult(getInstrumentsProgram(symbol, projection));
+    }
+
+    case "schwab_get_instrument_by_cusip": {
+      const cusip = args.cusip as string;
+      return runWithResult(getInstrumentByCusipProgram(cusip));
     }
 
     default:

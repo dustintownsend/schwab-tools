@@ -8,7 +8,10 @@ import {
   AccountService,
   QuoteService,
   PriceHistoryService,
+  MoverService,
+  InstrumentService,
   OptionChainService,
+  UserPreferenceService,
   OrderService,
   type SchwabConfigShape,
   type StoredTokensShape,
@@ -32,8 +35,13 @@ import type {
   Quote,
   Candle,
   MarketHours,
+  Mover,
+  Instrument,
+  InstrumentProjection,
   OptionChain,
   CompactOptionChain,
+  Expiration,
+  UserPreference,
   Order,
 } from "../schemas/index.js";
 
@@ -121,6 +129,20 @@ export const AccountServiceTest = (mockData: {
     },
     getAccounts: Effect.succeed(mockData.accounts ?? []),
     getTransactions: () => Effect.succeed(mockData.transactions ?? []),
+    getTransaction: (_accountHash: string, transactionId: string) => {
+      const tx = mockData.transactions?.find(
+        (transaction) => transaction.transactionId === transactionId
+      );
+      if (tx) {
+        return Effect.succeed(tx);
+      }
+      return Effect.fail(
+        new AccountNotFoundError({
+          accountNumber: transactionId,
+          message: `Transaction ${transactionId} not found`,
+        })
+      );
+    },
   });
 
 /**
@@ -133,6 +155,28 @@ export const QuoteServiceTest = (mockQuotes: readonly Quote[]) =>
         mockQuotes.filter((q) =>
           symbols.map((s) => s.toUpperCase()).includes(q.symbol.toUpperCase())
         )
+      ),
+    getQuotesByRequest: (request: {
+      symbols?: readonly string[];
+      cusips?: readonly string[];
+      ssids?: readonly string[];
+    }) =>
+      Effect.succeed(
+        mockQuotes.filter((q) => {
+          if (
+            (!request.symbols || request.symbols.length === 0) &&
+            (!request.cusips || request.cusips.length === 0) &&
+            (!request.ssids || request.ssids.length === 0)
+          ) {
+            return false;
+          }
+          if (request.symbols && request.symbols.length > 0) {
+            return request.symbols
+              .map((s) => s.toUpperCase())
+              .includes(q.symbol.toUpperCase());
+          }
+          return true;
+        })
       ),
     getQuote: (symbol: string) => {
       const quote = mockQuotes.find(
@@ -160,6 +204,36 @@ export const PriceHistoryServiceTest = (mockData: {
   Layer.succeed(PriceHistoryService, {
     getPriceHistory: () => Effect.succeed(mockData.candles ?? []),
     getMarketHours: () => Effect.succeed(mockData.marketHours ?? []),
+    getMarketHour: () => Effect.succeed(mockData.marketHours ?? []),
+  });
+
+/**
+ * Mock Movers service
+ */
+export const MoverServiceTest = (mockMovers: readonly Mover[]) =>
+  Layer.succeed(MoverService, {
+    getMovers: () => Effect.succeed(mockMovers),
+  });
+
+/**
+ * Mock Instruments service
+ */
+export const InstrumentServiceTest = (mockInstruments: readonly Instrument[]) =>
+  Layer.succeed(InstrumentService, {
+    getInstruments: (_symbol: string, _projection: InstrumentProjection) =>
+      Effect.succeed(mockInstruments),
+    getInstrumentByCusip: (cusip: string) => {
+      const instrument = mockInstruments.find((item) => item.cusip === cusip);
+      if (instrument) {
+        return Effect.succeed(instrument);
+      }
+      return Effect.fail(
+        new SymbolNotFoundError({
+          symbol: cusip,
+          message: `Instrument ${cusip} not found`,
+        })
+      );
+    },
   });
 
 /**
@@ -168,6 +242,7 @@ export const PriceHistoryServiceTest = (mockData: {
 export const OptionChainServiceTest = (mockData: {
   optionChain?: OptionChain;
   compactChain?: CompactOptionChain;
+  expirationChain?: readonly Expiration[];
 }) =>
   Layer.succeed(OptionChainService, {
     getOptionChain: (symbol: string) => {
@@ -192,6 +267,27 @@ export const OptionChainServiceTest = (mockData: {
         })
       );
     },
+    getExpirationChain: (symbol: string) => {
+      if (mockData.expirationChain) {
+        return Effect.succeed(mockData.expirationChain);
+      }
+      return Effect.fail(
+        new SymbolNotFoundError({
+          symbol,
+          message: "Option expiration chain not found",
+        })
+      );
+    },
+  });
+
+/**
+ * Mock User Preference service
+ */
+export const UserPreferenceServiceTest = (
+  preferences: readonly UserPreference[]
+) =>
+  Layer.succeed(UserPreferenceService, {
+    getUserPreference: Effect.succeed(preferences),
   });
 
 /**

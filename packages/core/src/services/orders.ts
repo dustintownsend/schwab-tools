@@ -50,6 +50,38 @@ interface SchwabOrder {
   statusDescription?: string;
 }
 
+interface SchwabPreviewOrderLeg {
+  quantity: number;
+  finalSymbol?: string;
+  assetType?: string;
+  instruction?: string;
+}
+
+interface SchwabPreviewOrderStrategy {
+  accountNumber?: string;
+  enteredTime?: string;
+  closeTime?: string;
+  orderStrategyType?: string;
+  session?: string;
+  duration?: string;
+  orderType?: string;
+  status?: string;
+  price?: number;
+  filledQuantity?: number;
+  remainingQuantity?: number;
+  orderLegs?: SchwabPreviewOrderLeg[];
+}
+
+interface SchwabPreviewOrderResponse {
+  orderId?: number;
+  orderStrategy?: SchwabPreviewOrderStrategy;
+}
+
+const ORDER_LOOKBACK_DAYS = 30;
+const ACCOUNT_ORDER_MAX_RANGE_DAYS = 365;
+const ALL_ORDER_MAX_RANGE_DAYS = 60;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 // Mappers
 const mapOrderLeg = (leg: SchwabOrderLeg): OrderLeg => ({
   instruction: leg.instruction as OrderInstruction,
@@ -91,11 +123,92 @@ const mapOrder = (schwabOrder: SchwabOrder): Order => {
   };
 };
 
+const toApiDuration = (duration: OrderSpec["duration"]): string => {
+  switch (duration) {
+    case "GTC":
+      return "GOOD_TILL_CANCEL";
+    case "FOK":
+      return "FILL_OR_KILL";
+    case "IOC":
+      return "IMMEDIATE_OR_CANCEL";
+    default:
+      return duration;
+  }
+};
+
+const mapPreviewOrder = (
+  response: SchwabPreviewOrderResponse,
+  fallbackOrder: OrderSpec
+): Order => {
+  const strategy = response.orderStrategy;
+  const legs = strategy?.orderLegs ?? [];
+  const orderLegCollection =
+    legs.length > 0
+      ? legs.map<OrderLeg>((leg) => ({
+          instruction:
+            (leg.instruction as OrderInstruction | undefined) ??
+            fallbackOrder.orderLegCollection[0]?.instruction ??
+            "BUY",
+          quantity: leg.quantity,
+          instrument: {
+            symbol:
+              leg.finalSymbol ?? fallbackOrder.orderLegCollection[0]?.instrument.symbol ?? "",
+            assetType:
+              (leg.assetType as AssetType | undefined) ??
+              fallbackOrder.orderLegCollection[0]?.instrument.assetType ??
+              "UNKNOWN",
+          },
+        }))
+      : fallbackOrder.orderLegCollection;
+  const totalQuantity = orderLegCollection.reduce((sum, leg) => sum + leg.quantity, 0);
+
+  return {
+    orderId: String(response.orderId ?? 0),
+    accountNumber: String(strategy?.accountNumber ?? ""),
+    orderType: (strategy?.orderType as Order["orderType"]) ?? fallbackOrder.orderType,
+    session: (strategy?.session as Order["session"]) ?? fallbackOrder.session,
+    duration: (strategy?.duration as Order["duration"]) ?? fallbackOrder.duration,
+    price: strategy?.price ?? fallbackOrder.price,
+    stopPrice: fallbackOrder.stopPrice,
+    orderLegCollection,
+    orderStrategyType:
+      (strategy?.orderStrategyType as Order["orderStrategyType"]) ??
+      fallbackOrder.orderStrategyType,
+    status: (strategy?.status as OrderStatus) ?? "ACCEPTED",
+    filledQuantity: strategy?.filledQuantity ?? 0,
+    remainingQuantity: strategy?.remainingQuantity ?? totalQuantity,
+    enteredTime: new Date(strategy?.enteredTime ?? new Date().toISOString()),
+    closeTime: strategy?.closeTime ? new Date(strategy.closeTime) : undefined,
+    statusDescription: undefined,
+  };
+};
+
+const resolveOrderWindow = (
+  params: OrderQueryParams | undefined,
+  maxRangeDays: number
+): {
+  fromEnteredTime: string;
+  toEnteredTime: string;
+} => {
+  const now = new Date();
+  const toRaw = params?.toEnteredTime ?? now;
+  const to = toRaw.getTime() > now.getTime() ? now : toRaw;
+  const defaultFrom = new Date(to.getTime() - ORDER_LOOKBACK_DAYS * DAY_MS);
+  const fromRaw = params?.fromEnteredTime ?? defaultFrom;
+  const minFrom = new Date(to.getTime() - maxRangeDays * DAY_MS);
+  const from = fromRaw.getTime() < minFrom.getTime() ? minFrom : fromRaw;
+
+  return {
+    fromEnteredTime: from.toISOString(),
+    toEnteredTime: to.toISOString(),
+  };
+};
+
 const buildOrderBody = (order: OrderSpec): Record<string, unknown> => {
   const body: Record<string, unknown> = {
     orderType: order.orderType,
     session: order.session,
-    duration: order.duration,
+    duration: toApiDuration(order.duration),
     orderStrategyType: order.orderStrategyType,
     orderLegCollection: order.orderLegCollection.map((leg) => ({
       instruction: leg.instruction,
@@ -108,11 +221,11 @@ const buildOrderBody = (order: OrderSpec): Record<string, unknown> => {
   };
 
   if (order.price !== undefined) {
-    body.price = order.price.toFixed(2);
+    body.price = order.price;
   }
 
   if (order.stopPrice !== undefined) {
-    body.stopPrice = order.stopPrice.toFixed(2);
+    body.stopPrice = order.stopPrice;
   }
 
   return body;
@@ -126,11 +239,12 @@ const makeOrderService = Effect.gen(function* () {
 
   const placeOrder = (accountHash: string, order: OrderSpec) =>
     Effect.gen(function* () {
+      const encodedAccountHash = encodeURIComponent(accountHash);
       const body = buildOrderBody(order);
 
       const response = yield* httpClient.request<{ orderId?: string }>({
         method: "POST",
-        path: `/trader/v1/accounts/${accountHash}/orders`,
+        path: `/trader/v1/accounts/${encodedAccountHash}/orders`,
         body,
       });
 
@@ -149,16 +263,13 @@ const makeOrderService = Effect.gen(function* () {
 
   const getOrders = (accountHash: string, params?: OrderQueryParams) =>
     Effect.gen(function* () {
-      const queryParams: Record<string, string | number | undefined> = {};
+      const encodedAccountHash = encodeURIComponent(accountHash);
+      const queryParams: Record<string, string | number | undefined> = {
+        ...resolveOrderWindow(params, ACCOUNT_ORDER_MAX_RANGE_DAYS),
+      };
 
       if (params?.status && params.status !== "ALL") {
         queryParams.status = params.status;
-      }
-      if (params?.fromEnteredTime) {
-        queryParams.fromEnteredTime = params.fromEnteredTime.toISOString();
-      }
-      if (params?.toEnteredTime) {
-        queryParams.toEnteredTime = params.toEnteredTime.toISOString();
       }
       if (params?.maxResults) {
         queryParams.maxResults = params.maxResults;
@@ -166,7 +277,7 @@ const makeOrderService = Effect.gen(function* () {
 
       const response = yield* httpClient.request<SchwabOrder[]>({
         method: "GET",
-        path: `/trader/v1/accounts/${accountHash}/orders`,
+        path: `/trader/v1/accounts/${encodedAccountHash}/orders`,
         params: queryParams,
       });
 
@@ -175,16 +286,12 @@ const makeOrderService = Effect.gen(function* () {
 
   const getAllOrders = (params?: OrderQueryParams) =>
     Effect.gen(function* () {
-      const queryParams: Record<string, string | number | undefined> = {};
+      const queryParams: Record<string, string | number | undefined> = {
+        ...resolveOrderWindow(params, ALL_ORDER_MAX_RANGE_DAYS),
+      };
 
       if (params?.status && params.status !== "ALL") {
         queryParams.status = params.status;
-      }
-      if (params?.fromEnteredTime) {
-        queryParams.fromEnteredTime = params.fromEnteredTime.toISOString();
-      }
-      if (params?.toEnteredTime) {
-        queryParams.toEnteredTime = params.toEnteredTime.toISOString();
       }
       if (params?.maxResults) {
         queryParams.maxResults = params.maxResults;
@@ -201,9 +308,11 @@ const makeOrderService = Effect.gen(function* () {
 
   const getOrder = (accountHash: string, orderId: string) =>
     Effect.gen(function* () {
+      const encodedAccountHash = encodeURIComponent(accountHash);
+      const encodedOrderId = encodeURIComponent(orderId);
       const response = yield* httpClient.request<SchwabOrder>({
         method: "GET",
-        path: `/trader/v1/accounts/${accountHash}/orders/${orderId}`,
+        path: `/trader/v1/accounts/${encodedAccountHash}/orders/${encodedOrderId}`,
       });
 
       return mapOrder(response);
@@ -211,9 +320,11 @@ const makeOrderService = Effect.gen(function* () {
 
   const cancelOrder = (accountHash: string, orderId: string) =>
     Effect.gen(function* () {
+      const encodedAccountHash = encodeURIComponent(accountHash);
+      const encodedOrderId = encodeURIComponent(orderId);
       yield* httpClient.request({
         method: "DELETE",
-        path: `/trader/v1/accounts/${accountHash}/orders/${orderId}`,
+        path: `/trader/v1/accounts/${encodedAccountHash}/orders/${encodedOrderId}`,
       });
     });
 
@@ -223,11 +334,13 @@ const makeOrderService = Effect.gen(function* () {
     newOrder: OrderSpec
   ) =>
     Effect.gen(function* () {
+      const encodedAccountHash = encodeURIComponent(accountHash);
+      const encodedOrderId = encodeURIComponent(orderId);
       const body = buildOrderBody(newOrder);
 
       const response = yield* httpClient.request<{ orderId?: string }>({
         method: "PUT",
-        path: `/trader/v1/accounts/${accountHash}/orders/${orderId}`,
+        path: `/trader/v1/accounts/${encodedAccountHash}/orders/${encodedOrderId}`,
         body,
       });
 
@@ -246,15 +359,24 @@ const makeOrderService = Effect.gen(function* () {
 
   const previewOrder = (accountHash: string, order: OrderSpec) =>
     Effect.gen(function* () {
+      const encodedAccountHash = encodeURIComponent(accountHash);
       const body = buildOrderBody(order);
 
-      const response = yield* httpClient.request<SchwabOrder>({
+      const response = yield* httpClient.request<unknown>({
         method: "POST",
-        path: `/trader/v1/accounts/${accountHash}/previewOrder`,
+        path: `/trader/v1/accounts/${encodedAccountHash}/previewOrder`,
         body,
       });
 
-      return mapOrder(response);
+      if (
+        response &&
+        typeof response === "object" &&
+        "orderLegCollection" in response
+      ) {
+        return mapOrder(response as SchwabOrder);
+      }
+
+      return mapPreviewOrder(response as SchwabPreviewOrderResponse, order);
     });
 
   return {

@@ -8,8 +8,11 @@ import {
   type CompactOptionChain,
   type CompactExpiration,
   type CompactOption,
+  type Expiration,
   type PutCall,
   SchwabOptionChainResponse,
+  SchwabExpiration,
+  SchwabExpirationChainResponse,
   SchwabOptionContract,
 } from "../schemas/index.js";
 
@@ -17,18 +20,18 @@ import {
 const mapOptionContract = (contract: typeof SchwabOptionContract.Type): OptionContract => ({
   symbol: contract.symbol,
   description: contract.description,
-  bid: contract.bid,
-  ask: contract.ask,
-  last: contract.last,
-  mark: contract.mark,
-  volume: contract.totalVolume,
-  openInterest: contract.openInterest,
+  bid: contract.bid ?? contract.bidPrice ?? 0,
+  ask: contract.ask ?? contract.askPrice ?? 0,
+  last: contract.last ?? contract.lastPrice ?? 0,
+  mark: contract.mark ?? contract.markPrice ?? 0,
+  volume: contract.totalVolume ?? 0,
+  openInterest: contract.openInterest ?? 0,
   strikePrice: contract.strikePrice,
   expirationDate: contract.expirationDate,
-  daysToExpiration: contract.daysToExpiration,
+  daysToExpiration: contract.daysToExpiration ?? 0,
   putCall: contract.putCall as PutCall,
-  inTheMoney: contract.inTheMoney,
-  multiplier: contract.multiplier,
+  inTheMoney: contract.inTheMoney ?? contract.isInTheMoney ?? false,
+  multiplier: contract.multiplier ?? 100,
   delta: contract.delta,
   gamma: contract.gamma,
   theta: contract.theta,
@@ -55,14 +58,26 @@ const mapDateMap = (
   return result;
 };
 
-const mapOptionChain = (response: typeof SchwabOptionChainResponse.Type): OptionChain => ({
-  symbol: response.symbol,
-  underlyingPrice: response.underlyingPrice,
-  volatility: response.volatility,
-  numberOfContracts: response.numberOfContracts,
-  callExpDateMap: mapDateMap(response.callExpDateMap ?? {}),
-  putExpDateMap: mapDateMap(response.putExpDateMap ?? {}),
-});
+const mapOptionChain = (response: typeof SchwabOptionChainResponse.Type): OptionChain => {
+  const callExpDateMap = mapDateMap(response.callExpDateMap ?? {});
+  const putExpDateMap = mapDateMap(response.putExpDateMap ?? {});
+  const computedContracts =
+    Object.values(callExpDateMap)
+      .flatMap((strikeMap) => Object.values(strikeMap))
+      .reduce((sum, contracts) => sum + contracts.length, 0) +
+    Object.values(putExpDateMap)
+      .flatMap((strikeMap) => Object.values(strikeMap))
+      .reduce((sum, contracts) => sum + contracts.length, 0);
+
+  return {
+    symbol: response.symbol,
+    underlyingPrice: response.underlyingPrice,
+    volatility: response.volatility ?? 0,
+    numberOfContracts: response.numberOfContracts ?? computedContracts,
+    callExpDateMap,
+    putExpDateMap,
+  };
+};
 
 const toCompactOption = (contract: OptionContract): CompactOption => ({
   symbol: contract.symbol,
@@ -112,6 +127,17 @@ const toCompactChain = (chain: OptionChain): CompactOptionChain => {
   };
 };
 
+const mapExpiration = (
+  expiration: typeof SchwabExpiration.Type
+): Expiration => ({
+  expirationDate: expiration.expirationDate ?? expiration.expiration ?? "",
+  daysToExpiration: expiration.daysToExpiration,
+  expirationType: expiration.expirationType,
+  standard: expiration.standard,
+  settlementType: expiration.settlementType,
+  optionRoots: expiration.optionRoots,
+});
+
 const formatDate = (date: Date): string => date.toISOString().split("T")[0];
 
 /**
@@ -138,6 +164,15 @@ const makeOptionChainService = Effect.gen(function* () {
       if (params?.includeUnderlyingQuote !== undefined) {
         queryParams.includeUnderlyingQuote = params.includeUnderlyingQuote;
       }
+      if (params?.strategy) {
+        queryParams.strategy = params.strategy;
+      }
+      if (params?.interval !== undefined) {
+        queryParams.interval = params.interval;
+      }
+      if (params?.strike !== undefined) {
+        queryParams.strike = params.strike;
+      }
       if (params?.fromDate) {
         queryParams.fromDate = formatDate(params.fromDate);
       }
@@ -149,6 +184,24 @@ const makeOptionChainService = Effect.gen(function* () {
       }
       if (params?.expMonth) {
         queryParams.expMonth = params.expMonth;
+      }
+      if (params?.volatility !== undefined) {
+        queryParams.volatility = params.volatility;
+      }
+      if (params?.underlyingPrice !== undefined) {
+        queryParams.underlyingPrice = params.underlyingPrice;
+      }
+      if (params?.interestRate !== undefined) {
+        queryParams.interestRate = params.interestRate;
+      }
+      if (params?.daysToExpiration !== undefined) {
+        queryParams.daysToExpiration = params.daysToExpiration;
+      }
+      if (params?.optionType) {
+        queryParams.optionType = params.optionType;
+      }
+      if (params?.entitlement) {
+        queryParams.entitlement = params.entitlement;
       }
 
       const rawResponse = yield* httpClient.request<unknown>({
@@ -174,9 +227,11 @@ const makeOptionChainService = Effect.gen(function* () {
     Effect.gen(function* () {
       // Set default filters for compact response
       let toDate = params?.toDate;
+      let daysToExpiration = params?.daysToExpiration;
 
       // Filter by expiration days if specified
       if (params?.expirationDays) {
+        daysToExpiration = params.expirationDays;
         const expDate = new Date();
         expDate.setDate(expDate.getDate() + params.expirationDays);
         toDate = expDate;
@@ -186,15 +241,36 @@ const makeOptionChainService = Effect.gen(function* () {
         ...params,
         strikeCount: params?.strikeCount ?? 10, // Limit strikes
         toDate,
+        daysToExpiration,
       };
 
       const chain = yield* getOptionChain(symbol, chainParams);
       return toCompactChain(chain);
     });
 
+  const getExpirationChain = (symbol: string) =>
+    Effect.gen(function* () {
+      const rawResponse = yield* httpClient.request<unknown>({
+        method: "GET",
+        path: "/marketdata/v1/expirationchain",
+        params: {
+          symbol: symbol.toUpperCase(),
+        },
+      });
+
+      const response = yield* decode(
+        SchwabExpirationChainResponse,
+        rawResponse,
+        "Option expiration chain API response"
+      );
+
+      return response.expirationList.map(mapExpiration);
+    });
+
   return {
     getOptionChain,
     getCompactOptionChain,
+    getExpirationChain,
   };
 });
 

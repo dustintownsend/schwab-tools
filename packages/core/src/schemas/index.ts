@@ -12,3 +12,9 @@ export * from "./options.js";
 
 // Order schemas
 export * from "./orders.js";
+
+// User preference schemas
+export * from "./user-preferences.js";
+
+// Market movers and instruments schemas
+export * from "./market.js";
