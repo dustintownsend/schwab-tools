@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Prerequisites
+
+- [Bun](https://bun.sh/) v1.0+
+- Schwab Developer API credentials (see README.md for setup)
+
 ## Commands
 
 ```bash
@@ -11,6 +16,7 @@ bun install
 # Run tests
 bun test                    # All tests
 bun test --watch            # Watch mode
+bun test --coverage         # With coverage report
 bun test packages/core/src/services/quotes.test.ts  # Single test file
 
 # Type checking
@@ -94,3 +100,11 @@ API responses are validated with Effect Schema (`packages/core/src/schemas/`). U
 ### Configuration
 
 Credentials stored in `~/.schwab-tools/config.json` and tokens in `~/.schwab-tools/tokens.json`. Managed via `bun cli auth configure` and `bun cli auth login`.
+
+## Claude Code Automations
+
+This project includes custom Claude Code skills and hooks in `.claude/`:
+
+- `/gen-test <file>` - Generate Effect-style tests with mock layers
+- `/new-service <name>` - Scaffold a new Effect service with all required files
+- **Auto hooks**: TypeScript type-check and related test runs on file edit
